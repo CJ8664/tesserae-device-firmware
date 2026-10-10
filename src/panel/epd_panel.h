@@ -95,6 +95,14 @@ typedef struct epd_driver {
     void (*display_partial_mode)(const uint8_t *image, int x, int y, int w,
                                  int h, epd_refresh_t mode);
 
+    /* OPTIONAL (NULL = always true): would display_partial_mode in `mode`
+     * refresh ONLY the rect right now? False where the driver would fall back
+     * to a full repaint of `image` (SSD1677 with no shadow after a deep-sleep
+     * boot, or any non-fast mode there). Callers drawing into a buffer that is
+     * not the real frame (touch v3's scratch feedback) must check it: a full
+     * repaint from that buffer would blank the panel (#43). */
+    bool (*partial_rect_safe)(epd_refresh_t mode);
+
     /* OPTIONAL (all three NULL = unsupported): paint a frame the caller
      * cannot hold whole. For boards whose frame outgrows their RAM (the
      * paperlesspaper OpenPaper L: 960000 bytes on a PSRAM-less C6), the frame

@@ -44,6 +44,12 @@ void epd_display_partial_mode(const uint8_t *image, int x, int y, int w, int h,
     }
 }
 
+bool epd_partial_is_rect_safe(epd_refresh_t mode)
+{
+    const epd_driver_t *d = epd_active_driver();
+    return d->partial_rect_safe ? d->partial_rect_safe(mode) : true;
+}
+
 /* Row streaming (see epd_panel.h). All three are present or none is. */
 bool epd_supports_stream(void)
 {

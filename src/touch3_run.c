@@ -580,7 +580,7 @@ static uint8_t *redraw_prim(const t3_prim_t *p, bool *real)
 }
 
 /* Refresh a rect, forcing a quality GC16 every T3_HYGIENE_N partials on that
- * primitive (firmware-spec §9).
+ * primitive (firmware-spec §9). Returns false when nothing reached the glass.
  *
  * Feedback uses DU -- the same waveform the v1/v2 overlay tap-echo path has
  * used in production all along, which is the strongest evidence available that
@@ -604,7 +604,7 @@ static uint8_t *redraw_prim(const t3_prim_t *p, bool *real)
  * t3_draw_primitive restores byte-for-byte. The button is the only primitive
  * that partial-refreshes one rect twice in close succession, which is the
  * standing suspect. Untested on DU. */
-static void refresh_prim(t3_prim_t *p, t3_rect_t r, uint8_t *fb, bool real)
+static bool refresh_prim(t3_prim_t *p, t3_rect_t r, uint8_t *fb, bool real)
 {
     epd_refresh_t mode = EPD_RF_DU;
     if (++p->partials >= T3_HYGIENE_N) {
@@ -616,15 +616,33 @@ static void refresh_prim(t3_prim_t *p, t3_rect_t r, uint8_t *fb, bool real)
     if (real) {
         /* Through overlay so its shared hygiene counter stays honest. */
         overlay_partial_refresh_mode(r.x, r.y, r.w, r.h, mode);
-        return;
+        return true;
     }
     /* Scratch buffer: stream the rect straight to the panel. Deliberately NOT
      * via overlay -- it would refresh from its own (absent) copy -- and the
      * hygiene pass stays a GC16 of this RECT, never a full-screen repaint,
-     * which from a scratch buffer would blank the panel. */
-    if (epd_port_init() != ESP_OK) return;
+     * which from a scratch buffer would blank the panel.
+     *
+     * Not every driver can promise that. The SSD1677 (Sticky, PaperMono)
+     * diffs against a shadow of the glass that deep sleep loses, and without
+     * it, or for any GC16, it repaints the whole frame: from here that wiped
+     * every other control off a touch wake that then got a 304 (#43). Defer
+     * the hygiene pass to DU there, and with no rect-only path at all skip
+     * the feedback; the action is dispatched regardless, and main forces a
+     * full frame on such a wake, which brings the shadow back. */
+    if (!epd_partial_is_rect_safe(mode)) {
+        if (mode == EPD_RF_GC16 && epd_partial_is_rect_safe(EPD_RF_DU)) {
+            mode = EPD_RF_DU;
+        } else {
+            ESP_LOGI(TAG, "'%s': no rect-only refresh without the frame; "
+                          "feedback skipped", p->id);
+            return false;
+        }
+    }
+    if (epd_port_init() != ESP_OK) return false;
     epd_init();
     epd_display_partial_mode(fb, r.x, r.y, r.w, r.h, mode);
+    return true;
 }
 
 /* Redraw + refresh in one step (the common feedback path). */
@@ -633,8 +651,7 @@ static bool repaint_prim(t3_prim_t *p)
     bool real = false;
     uint8_t *fb = redraw_prim(p, &real);
     if (!fb) return false;
-    refresh_prim(p, t3_feedback_rect(&s_spec, p), fb, real);
-    return true;
+    return refresh_prim(p, t3_feedback_rect(&s_spec, p), fb, real);
 }
 
 /* Invert a rect in the working framebuffer -- the press affordance for
@@ -650,8 +667,7 @@ static bool invert_rect(t3_prim_t *p, t3_rect_t r)
     if (!fb) return false;
     overlay_invert_rect(fb, EPD_WIDTH, EPD_HEIGHT, panel_bpp(),
                         r.x, r.y, r.w, r.h);
-    refresh_prim(p, r, fb, real);
-    return true;
+    return refresh_prim(p, r, fb, real);
 }
 
 /* ---- reconcile -------------------------------------------------------- */
@@ -834,9 +850,9 @@ bool touch3_try_touch(int x0, int y0, int x1, int y1, uint32_t ms,
          * Tier 2 shows the inverted state as its pending affordance until the
          * next frame lands, rather than a fake optimistic result (§9). */
         int64_t t_press = esp_timer_get_time();
-        invert_rect(p, p->rect);
+        bool shown = invert_rect(p, p->rect);
         report_interaction(p, T3_G_TAP, false, 0);
-        if (p->tier != 2) {
+        if (shown && p->tier != 2) {
             /* Keep the press visible for T3_PRESS_MIN_MS before restoring --
              * /interact can return far faster than the eye (or, on the bench,
              * than the panel) copes with. The feedback is already on glass, so

@@ -1020,6 +1020,13 @@ static void ssd1677_display_partial_mode(const uint8_t *image, int x, int y,
     else
         ssd1677_display(image);
 }
+
+/* Only the two-tone path with a shadow stays inside the rect; everything else
+ * above is a full repaint. The shadow does not survive the MCU's deep sleep. */
+static bool ssd1677_partial_rect_safe(epd_refresh_t mode)
+{
+    return (mode == EPD_RF_A2 || mode == EPD_RF_DU) && s_shadow_valid;
+}
 #endif /* !EPD_MONO */
 
 /* ---------- exported vtable ---------- */
@@ -1049,6 +1056,7 @@ const epd_driver_t ssd1677_gray_driver = {
 #ifndef EPD_MONO
     .display_partial      = ssd1677_display_partial,
     .display_partial_mode = ssd1677_display_partial_mode,
+    .partial_rect_safe    = ssd1677_partial_rect_safe,
 #endif
 };
 

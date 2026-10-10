@@ -23,6 +23,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with USB as the second console. Unverified on hardware; flash
   `epdiy-v7-ed133ut2-selftest` first.
 
+### Fixed
+
+- Tapping a device-drawn control to wake a reTerminal Sticky or M5Stack
+  PaperMono no longer erases the other controls (#43). After deep sleep the
+  SSD1677 driver no longer knows what is on the glass, so the press effect,
+  drawn into a blank buffer, repainted the whole screen, and an unchanged
+  frame (304) left it that way. The press effect is now skipped when the panel
+  cannot refresh just that control, the tap is still sent, and such a wake
+  fetches the full frame so the screen is redrawn and taps in the linger
+  window that follows animate again. The reTerminal E1003 is unchanged.
+
 ## [1.45.0] - 2026-10-09
 
 ### Added

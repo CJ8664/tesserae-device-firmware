@@ -64,6 +64,10 @@ void epd_display_partial(const uint8_t *image, int x, int y, int w, int h,
 void epd_display_partial_mode(const uint8_t *image, int x, int y, int w, int h,
                               epd_refresh_t mode);
 
+/* True when epd_display_partial_mode(mode) would refresh only the rect right
+ * now rather than repaint the whole frame (epd_panel.h partial_rect_safe). */
+bool epd_partial_is_rect_safe(epd_refresh_t mode);
+
 /* Row streaming for boards with no RAM for a frame (epd_panel.h stream_*).
  * epd_supports_stream() is a build-time fact of the active driver. */
 bool epd_supports_stream(void);

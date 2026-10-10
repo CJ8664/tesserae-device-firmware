@@ -2234,6 +2234,7 @@ void app_main(void)
     /* Kept in function scope so the WiFi-fail path can queue an unsent stroke. */
     touch_stroke_t touch_st = { .valid = false };
     uint64_t       touch_ev = 0;
+    bool           touch3_tap = false;   /* touch v3 took this wake's tap */
     if (woke_by_touch) {
         if (touch_init() == ESP_OK) {
             /* The RTC wake stub may have grabbed the point ~1 ms after wake. Take
@@ -2291,6 +2292,7 @@ void app_main(void)
                                      touch_st.x1, touch_st.y1,
                                      touch_st.ms, &p2_poll)) {
                     /* wake continues: frame GET + status deliver the result */
+                    touch3_tap = true;
                 } else if (proto2_try_touch(touch_st.x0, touch_st.y0,
                                      touch_st.x1, touch_st.y1,
                                      touch_st.ms, &p2_poll)) {
@@ -2666,6 +2668,15 @@ void app_main(void)
      * server returns 200 (full frame) instead of 304. In-memory only -- not
      * persisted, so the next timer wake resumes normal 304 dedup. */
     if (woke_by_button) rest_config_set_frame_etag("");
+#if BOARD_HAS_TOUCH
+    /* Likewise a v3 tap on a panel whose rect-only partial needs a shadow of
+     * the glass that deep sleep lost (SSD1677: Sticky, PaperMono). Its press
+     * feedback was skipped for want of one, and the full frame puts it back
+     * so taps in the linger window that follows animate again (#43). Drivers
+     * that keep their own image (IT8951) answer true here and keep the 304. */
+    if (touch3_tap && !epd_partial_is_rect_safe(EPD_RF_DU))
+        rest_config_set_frame_etag("");
+#endif
 
     /* 2. Frame metadata, with If-None-Match for the ETag/304 dedup. */
     rest_frame_out_t fo;

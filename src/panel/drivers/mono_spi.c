@@ -1617,6 +1617,14 @@ static void mono_display_partial_mode(const uint8_t *image, int x, int y,
         mono_paint(image, PANEL_FULL);
 }
 
+/* mono_partial() repaints the whole frame with no shadow or when its hygiene
+ * full is due; only the fast modes ever stay inside the rect. */
+static bool mono_partial_rect_safe(epd_refresh_t mode)
+{
+    return (mode == EPD_RF_A2 || mode == EPD_RF_DU) && s_shadow_valid &&
+           s_shadow && s_partials_since_full < MONO_PARTIALS_BEFORE_FULL;
+}
+
 #ifdef EPD_SELFTEST
 /* Bench exercise for the -partialtest env, run by mono_show_color_bars() after
  * its bars are on the glass (main.c's EPD_SELFTEST path only paints bars):
@@ -1887,6 +1895,7 @@ const epd_driver_t mono_spi_driver = {
 #if MONO_1BPP && defined(EPD_MONO_PARTIAL)
     .display_partial      = mono_display_partial,
     .display_partial_mode = mono_display_partial_mode,
+    .partial_rect_safe    = mono_partial_rect_safe,
 #endif
 };
 
