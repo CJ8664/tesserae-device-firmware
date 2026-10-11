@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- `epdiy-v7-ed133ut2-wholerect`, the v7 build with `EPD_PAR_PARTIAL_WHOLE_RECT`:
+  a grey partial drives every pixel of its whole rect through the clear and
+  the grey matrix, not only the pixels and rows that differ from the glass
+  copy, so a window updates as one conventional flash and shows exactly what
+  the rect holds. For telling a masking fault from a wrong rect on glass
+  (#39). The default build is unchanged.
+
 ## [1.47.0] - 2026-10-11
 
 ### Added

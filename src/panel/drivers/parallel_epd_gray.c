@@ -109,6 +109,15 @@ static const char *TAG = "epd_par";
 #ifndef EPD_PAR_PARTIAL_PASSES
 #define EPD_PAR_PARTIAL_PASSES 4
 #endif
+/* EPD_PAR_PARTIAL_WHOLE_RECT: a grey partial drives every pixel of the whole
+ * rect through the clear and the matrix, not only the pixels (and rows) that
+ * differ from the glass copy, so the window is one conventional update (what
+ * an IT8951 GC16 window does) and the unchanged pixels inside it are driven in
+ * company with their neighbours as a full paint would. The rect flashes as a
+ * whole; nothing outside it is touched either way. A knob for judging on glass
+ * whether the masked form (the default) is what leaves a window partly updated
+ * or off its tone (#39): with it, what the rect holds is exactly what the glass
+ * shows afterwards, so a window still wrong says the rect's content is. */
 #endif
 
 /* 2-bit drive codes, replicated across a byte (4 pixels). */
@@ -948,6 +957,13 @@ static void par_partial(const uint8_t *image, int x, int y, int w, int h,
         ESP_LOGI(TAG, "partial %d,%d %dx%d: nothing changed", x, y, w, h);
         return;
     }
+#ifdef EPD_PAR_PARTIAL_WHOLE_RECT
+    /* Every row and every pixel of the rect is driven, whatever the diff
+     * found, so the mask is all ones over the whole rect: the diff above
+     * only decides whether there is anything to do at all. A 1-bit partial
+     * keeps its codes, which already say what each pixel needs. */
+    if (!fast) { cy0 = 0; cy1 = h - 1; memset(rows, 0xFF, (size_t)pitch * h); }
+#endif
 
     const par_band_t band = {
         .y0 = y + cy0, .y1 = y + cy1 + 1,
@@ -974,8 +990,13 @@ static void par_partial(const uint8_t *image, int x, int y, int w, int h,
     uniform_passes(CODE_NEUTRAL, 1);   /* leave the drivers discharged */
     update_done();
     free(rows);
-    ESP_LOGI(TAG, "%s partial %d,%d %dx%d (changed rows %d..%d) in %lld ms",
+    ESP_LOGI(TAG, "%s partial %d,%d %dx%d (changed rows %d..%d%s) in %lld ms",
              fast ? "1-bit" : "grey", x, y, w, h, band.y0, band.y1 - 1,
+#ifdef EPD_PAR_PARTIAL_WHOLE_RECT
+             fast ? "" : ", whole rect driven",
+#else
+             "",
+#endif
              (esp_timer_get_time() - t0) / 1000);
 }
 
