@@ -61,6 +61,7 @@ extern char font8x8_basic[128][8];
 #include "esp_lcd_panel_io.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -96,6 +97,18 @@ static const char *TAG = "epd_par";
  * the grey matrix's "starts from white" assumption true. */
 #ifndef EPD_PAR_CLEAR_PASSES
 #define EPD_PAR_CLEAR_PASSES   8
+#endif
+
+/* Partial refresh is opt-in per board (EPD_PAR_PARTIAL). It costs a second
+ * full-frame copy in PSRAM and drops the rails after every update (see
+ * update_done), so a board that has not had a partial judged on its own glass
+ * keeps exactly the full-refresh behaviour it shipped with. */
+#ifdef EPD_PAR_PARTIAL
+/* Passes of the 1-bit (DU/A2) partial. FastEPD's iPartialPasses default; a
+ * panel that leaves greyish blacks after a fast partial wants more. */
+#ifndef EPD_PAR_PARTIAL_PASSES
+#define EPD_PAR_PARTIAL_PASSES 4
+#endif
 #endif
 
 /* 2-bit drive codes, replicated across a byte (4 pixels). */
@@ -162,6 +175,18 @@ static uint8_t *s_code_lo_b;
 #endif
 
 static volatile bool s_dma_done = true;
+
+#ifdef EPD_PAR_PARTIAL
+/* What the glass shows, as a 4bpp frame. The panel has no controller and no
+ * memory, so a partial can only find the pixels that need driving by diffing
+ * the new frame against this. Every full paint and clear refreshes it; the
+ * selftest sheets (not a frame) mark it invalid; a reboot or deep sleep loses
+ * it, and a partial with no valid copy falls back to a full paint, which
+ * rebuilds it. Allocated on the first full paint, in PSRAM: 960000 bytes on
+ * the ED133UT2. */
+static uint8_t *s_glass;
+static bool     s_glass_valid;
+#endif
 
 static bool IRAM_ATTR on_tx_done(esp_lcd_panel_io_handle_t io,
                                  esp_lcd_panel_io_event_data_t *ev, void *ctx)
@@ -492,6 +517,83 @@ static void gray_passes_bands(const uint8_t *level_per_row)
     }
 }
 
+#ifdef EPD_PAR_PARTIAL
+/* ------------------------------------------------------------------ */
+/* Partial passes: the full-panel scan with everything but a mask      */
+/* neutral                                                            */
+/* ------------------------------------------------------------------ */
+
+/* The gate driver has no row addressing, only a token walked down one row per
+ * CKV, so a partial still scans every row of every pass, exactly as a full
+ * update does (FastEPD's partials do the same). What makes it partial is the
+ * data: rows outside the changed band carry the all-neutral line, and inside
+ * the band every pixel that is not changing is masked to neutral too. Neutral
+ * (00) rather than skip (11) because it is what FastEPD sends for unchanged
+ * pixels and what every full pass already sends to the off-glass tail.
+ *
+ * The band is described in output bytes (4 px each): rows y0..y1-1, bytes
+ * b0..b1-1, and `rows` holds (y1-y0) x pitch bytes, one per output byte from
+ * b0. For a grey partial those bytes are a per-pixel mask (11 = this pixel
+ * changes); for a 1-bit partial they are the finished drive codes. */
+typedef struct {
+    int y0, y1;            /* changed rows, [y0, y1) */
+    int b0, b1;            /* changed output bytes, [b0, b1) */
+    int pitch;             /* bytes per row of `rows` */
+    const uint8_t *rows;
+} par_band_t;
+
+/* `count` passes of one drive code, ANDed with the band's bytes, so with a
+ * mask band this is the clear cycle confined to the changing pixels, and with
+ * code 0xFF and a drive-code band it is the 1-bit partial itself. */
+static void band_uniform_passes(const par_band_t *b, uint8_t code, int count)
+{
+    for (int k = 0; k < count; k++) {
+        row_start();
+        int slot = 0;
+        for (int y = 0; y < EPD_HEIGHT; y++) {
+            uint8_t *d = s_line[slot];
+            memset(d, CODE_NEUTRAL, ROW_BYTES);
+            if (y >= b->y0 && y < b->y1) {
+                const uint8_t *m = b->rows + (size_t)(y - b->y0) * b->pitch;
+                for (int n = b->b0; n < b->b1; n++)
+                    d[n] = (uint8_t)(m[n - b->b0] & code);
+            }
+            write_row(d, y != 0);
+            slot ^= 1;
+        }
+        pass_end();
+    }
+}
+
+/* The grey matrix over the band, masked per pixel. The AND is applied to the
+ * line just built (FastEPD's 4bpp rect path masks a different buffer from the
+ * one it sends, so its rows go out unmasked or mismasked; not copied). Only
+ * the band's bytes are translated, which is less CPU per row than a full pass,
+ * so the row timing the matrix was tuned at is still set by the DMA. */
+static void band_gray_passes(const par_band_t *b, const uint8_t *fb)
+{
+    for (int pass = 0; pass < GRAY_PASSES; pass++) {
+        const uint8_t *hi = s_code_hi + pass * 256;
+        const uint8_t *lo = s_code_lo + pass * 256;
+        row_start();
+        int slot = 0;
+        for (int y = 0; y < EPD_HEIGHT; y++) {
+            uint8_t *d = s_line[slot];
+            memset(d, CODE_NEUTRAL, ROW_BYTES);
+            if (y >= b->y0 && y < b->y1) {
+                const uint8_t *m = b->rows + (size_t)(y - b->y0) * b->pitch;
+                const uint8_t *s = fb + (size_t)y * SRC_PITCH + (size_t)b->b0 * 2;
+                for (int n = b->b0; n < b->b1; n++, s += 2)
+                    d[n] = (uint8_t)((hi[s[0]] | lo[s[1]]) & m[n - b->b0]);
+            }
+            write_row(d, y != 0);
+            slot ^= 1;
+        }
+        pass_end();
+    }
+}
+#endif /* EPD_PAR_PARTIAL */
+
 /* ------------------------------------------------------------------ */
 /* Selftest sheet: scrambled, lettered ramp bars                       */
 /* ------------------------------------------------------------------ */
@@ -671,12 +773,45 @@ static void par_init(void)
     power(true);
 }
 
+/* End of an update. On a partial-capable board the rails come down here rather
+ * than waiting for sleep(): the overlay path follows a partial, and its own
+ * full-quality repaints, with nothing that calls sleep(), and an always-on
+ * panel ticking a clock would otherwise hold the TPS65185's +/-15 V and VCOM
+ * on the glass between ticks. Without EPD_PAR_PARTIAL every caller of a full
+ * paint calls sleep() straight after, so nothing changes there. */
+static void update_done(void)
+{
+#ifdef EPD_PAR_PARTIAL
+    power(false);
+#endif
+}
+
+#ifdef EPD_PAR_PARTIAL
+/* The glass copy, allocated on first use. NULL (out of PSRAM) only costs the
+ * partials: every one then falls back to a full paint. */
+static uint8_t *glass_buf(void)
+{
+    if (!s_glass) {
+        s_glass = heap_caps_malloc(EPD_BUF_BYTES, MALLOC_CAP_SPIRAM);
+        if (!s_glass) ESP_LOGW(TAG, "no PSRAM for the glass copy; partials "
+                                    "will repaint the whole panel");
+    }
+    return s_glass;
+}
+#endif
+
 static void par_display(const uint8_t *image)
 {
     power(true);
     clear_cycle();
     gray_passes(image);
     uniform_passes(CODE_NEUTRAL, 1);   /* leave the drivers discharged */
+#ifdef EPD_PAR_PARTIAL
+    uint8_t *g = glass_buf();
+    if (g) memcpy(g, image, EPD_BUF_BYTES);
+    s_glass_valid = g != NULL;
+#endif
+    update_done();
     ESP_LOGI(TAG, "refresh done");
 }
 
@@ -693,8 +828,172 @@ static void par_clear(uint8_t color)
     clear_cycle();
     gray_passes_bands(rows);
     uniform_passes(CODE_NEUTRAL, 1);
+#ifdef EPD_PAR_PARTIAL
+    uint8_t *gl = glass_buf();
+    if (gl) memset(gl, (g << 4) | g, EPD_BUF_BYTES);
+    s_glass_valid = gl != NULL;
+#endif
+    update_done();
     ESP_LOGI(TAG, "clear to level %u done", g);
 }
+
+#ifdef EPD_PAR_PARTIAL
+/* ------------------------------------------------------------------ */
+/* Partial refresh                                                    */
+/* ------------------------------------------------------------------ */
+
+/* 2-bit mask for each pixel of an output byte whose two source bytes differ
+ * from the glass's, MSB pair = leftmost pixel as on the bus. */
+static inline uint8_t diff_mask(const uint8_t *s, const uint8_t *g)
+{
+    uint8_t m = 0;
+    if ((s[0] ^ g[0]) & 0xF0) m |= 0xC0;
+    if ((s[0] ^ g[0]) & 0x0F) m |= 0x30;
+    if ((s[1] ^ g[1]) & 0xF0) m |= 0x0C;
+    if ((s[1] ^ g[1]) & 0x0F) m |= 0x03;
+    return m;
+}
+
+/* 1-bit target of a pixel for DU/A2: black below the middle of the ramp,
+ * white from it up. */
+static inline uint8_t bw_level(uint8_t level) { return level < 8 ? 0x0 : 0xF; }
+
+/* Darken/lighten codes for the four pixels of an output byte under a 1-bit
+ * partial, and the glass's new levels for them. A pixel already at its 1-bit
+ * target is left neutral: driving a black pixel darker every tick only builds
+ * up charge on it. */
+static inline uint8_t bw_codes(const uint8_t *s, uint8_t *g)
+{
+    uint8_t codes = 0;
+    for (int p = 0; p < 4; p++) {
+        int byte = p >> 1, shift = (p & 1) ? 0 : 4;
+        uint8_t want = bw_level((uint8_t)((s[byte] >> shift) & 0x0F));
+        uint8_t have = (uint8_t)((g[byte] >> shift) & 0x0F);
+        if (want == have) continue;
+        codes |= (uint8_t)((want ? 0x2 : 0x1) << (6 - 2 * p));
+        g[byte] = (uint8_t)((g[byte] & ~(0x0F << shift)) | (want << shift));
+    }
+    return codes;
+}
+
+/* Repaint the rect x,y,w,h of `image` without touching the rest of the panel.
+ *
+ * Grey (GC16/GRAY): every changing pixel gets the full update to itself: the
+ * four-phase clear, so it starts from white as the matrix assumes, then the
+ * matrix, so it lands on the same tone a full paint would give it. The rest of
+ * the panel, unchanged pixels inside the rect included, sees neutral
+ * throughout and does not flash. It costs as many passes as a full update (the
+ * scan cannot skip rows), so it buys no time, only a still panel around the
+ * change.
+ *
+ * Fast (DU/A2): 1-bit, EPD_PAR_PARTIAL_PASSES of darken or lighten on the
+ * changing pixels only, no clear. Greys collapse to black or white, and the
+ * glass copy records what was actually drawn, so the next grey partial or
+ * full paint corrects them.
+ *
+ * Two speed-ups are worth trying on glass, and only there, since both change
+ * what the matrix was tuned against: a two-phase (black, white) clear for the
+ * grey partial, as FastEPD's CLEAR_FAST does; and latching the neutral rows
+ * outside the band without a new DMA burst for each, which would shorten every
+ * pass by the time those rows take to shift. */
+static void par_partial(const uint8_t *image, int x, int y, int w, int h,
+                        epd_refresh_t mode)
+{
+    if (!s_glass_valid || !s_glass) {
+        ESP_LOGI(TAG, "partial with no copy of the glass: full refresh");
+        par_display(image);
+        return;
+    }
+    /* Clip, then widen x to whole output bytes (4 px). */
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > EPD_WIDTH)  w = EPD_WIDTH - x;
+    if (y + h > EPD_HEIGHT) h = EPD_HEIGHT - y;
+    if (w <= 0 || h <= 0) return;
+    const int b0 = x / 4, b1 = (x + w + 3) / 4;
+    const int pitch = b1 - b0;
+    const bool fast = mode == EPD_RF_A2 || mode == EPD_RF_DU;
+
+    int64_t t0 = esp_timer_get_time();
+    uint8_t *rows = heap_caps_malloc((size_t)pitch * h, MALLOC_CAP_SPIRAM);
+    if (!rows) {
+        ESP_LOGW(TAG, "no PSRAM for a %dx%d partial: full refresh", w, h);
+        par_display(image);
+        return;
+    }
+
+    /* Diff against the glass and shrink the band to the rows that change.
+     * Columns are left at the rect's width: trimming them saves nothing,
+     * since a pass costs the same whatever the row holds. For a 1-bit
+     * partial the glass copy takes its new levels here, as the codes are
+     * built. */
+    int cy0 = h, cy1 = -1;
+    for (int r = 0; r < h; r++) {
+        const size_t off = (size_t)(y + r) * SRC_PITCH + (size_t)b0 * 2;
+        const uint8_t *s = image + off;
+        uint8_t *g = s_glass + off;
+        uint8_t *m = rows + (size_t)r * pitch;
+        uint8_t any = 0;
+        for (int n = 0; n < pitch; n++, s += 2, g += 2) {
+            m[n] = fast ? bw_codes(s, g) : diff_mask(s, g);
+            any |= m[n];
+        }
+        if (any) {
+            if (r < cy0) cy0 = r;
+            cy1 = r;
+        }
+    }
+    if (cy1 < 0) {
+        free(rows);
+        ESP_LOGI(TAG, "partial %d,%d %dx%d: nothing changed", x, y, w, h);
+        return;
+    }
+
+    const par_band_t band = {
+        .y0 = y + cy0, .y1 = y + cy1 + 1,
+        .b0 = b0, .b1 = b1, .pitch = pitch,
+        .rows = rows + (size_t)cy0 * pitch,
+    };
+    power(true);
+    if (fast) {
+        band_uniform_passes(&band, 0xFF, EPD_PAR_PARTIAL_PASSES);
+    } else {
+        band_uniform_passes(&band, CODE_DARKEN,  EPD_PAR_CLEAR_PASSES);
+        band_uniform_passes(&band, CODE_LIGHTEN, EPD_PAR_CLEAR_PASSES);
+        band_uniform_passes(&band, CODE_DARKEN,  EPD_PAR_CLEAR_PASSES);
+        band_uniform_passes(&band, CODE_LIGHTEN, EPD_PAR_CLEAR_PASSES);
+        band_uniform_passes(&band, CODE_NEUTRAL, 1);
+        band_gray_passes(&band, image);
+        /* The changed pixels now show the image; the unchanged ones already
+         * did, so the whole rect's rows can be copied across. */
+        for (int r = cy0; r <= cy1; r++) {
+            const size_t off = (size_t)(y + r) * SRC_PITCH + (size_t)b0 * 2;
+            memcpy(s_glass + off, image + off, (size_t)pitch * 2);
+        }
+    }
+    uniform_passes(CODE_NEUTRAL, 1);   /* leave the drivers discharged */
+    update_done();
+    free(rows);
+    ESP_LOGI(TAG, "%s partial %d,%d %dx%d (changed rows %d..%d) in %lld ms",
+             fast ? "1-bit" : "grey", x, y, w, h, band.y0, band.y1 - 1,
+             (esp_timer_get_time() - t0) / 1000);
+}
+
+static void par_display_partial(const uint8_t *image, int x, int y, int w,
+                                int h, bool fast)
+{
+    par_partial(image, x, y, w, h, fast ? EPD_RF_DU : EPD_RF_GC16);
+}
+
+/* Rect-only whenever the glass copy is valid, in every mode: the grey partial
+ * is as rect-bound as the fast one. Without it the partial repaints the whole
+ * panel from `image`, which a scratch buffer must not be (#43). */
+static bool par_partial_rect_safe(epd_refresh_t mode)
+{
+    (void)mode;
+    return s_glass_valid && s_glass;
+}
+#endif /* EPD_PAR_PARTIAL */
 
 /* Build one sheet's shared bar row and letter strip. order[] is the grey
  * level painted at each of the 16 bar positions, letters[] the glyph printed
@@ -755,6 +1054,9 @@ static void par_show_color_bars(void)
     uint8_t black_src[SRC_PITCH];
     uint8_t *strip = malloc((size_t)SHEET_STRIP_H * SRC_PITCH);
 
+#ifdef EPD_PAR_PARTIAL
+    s_glass_valid = false;   /* a sheet is not a frame the copy could hold */
+#endif
     if (!strip) {                       /* fall back to the plain ramp */
         uint8_t rows[EPD_HEIGHT];
         const int band = EPD_HEIGHT / 16;
@@ -821,11 +1123,16 @@ const epd_driver_t parallel_epd_gray_driver = {
     .show_color_bars    = par_show_color_bars,
     .show_palette_sweep = par_show_palette_sweep,
     .sleep              = par_sleep,
-    /* No partial refresh yet. This family CAN do it -- a rect-clipped pass
-     * with the rest of the row masked to skip codes -- but it needs the
-     * previous frame kept in PSRAM to diff against, and it is the one part
-     * that cannot be judged from a photo of a static frame. Left NULL, so
-     * overlay/touch-v3 stay unadvertised rather than half-working. */
+    /* Partial refresh only where the board opts in (EPD_PAR_PARTIAL): it
+     * needs the glass copy in PSRAM, and how a masked pass looks on a given
+     * glass cannot be judged from a photo of a static frame. Elsewhere these
+     * stay NULL, so overlay and touch v3 stay unadvertised rather than
+     * half-working. */
+#ifdef EPD_PAR_PARTIAL
+    .display_partial      = par_display_partial,
+    .display_partial_mode = par_partial,
+    .partial_rect_safe    = par_partial_rect_safe,
+#endif
 };
 
 #endif /* PANEL_DRIVER_PARALLEL_EPD_GRAY */

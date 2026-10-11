@@ -81,6 +81,18 @@
     /* 14 */ 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 1, 0, 2, \
     /* 15 */ 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 2, 2, 2, 2, 2 }
 
+/* Partial refresh in the parallel driver (glass copy in PSRAM, masked passes;
+ * see par_partial). The board is mains powered, so it is the one that sits in
+ * always-on mode with a clock ticking on the page, and partials are what let
+ * the server's small-change patches land without flashing the whole panel. */
+#define EPD_PAR_PARTIAL         1
+
+/* Local overlay render mode (overlay.h): advertises overlay schema 2, so the
+ * server delivers small periodic changes (a clock) as frame patches on the
+ * current digest instead of a new frame, and the firmware applies them as
+ * grey partials. No touch here, so no proto v2 or touch v3 (net_rest.c). */
+#define BOARD_OVERLAY_PARTIAL   1
+
 /* Board model -> default device id "EPDiy_V7_<mac-suffix>". */
 #define TESSERAE_DEVICE_MODEL  "EPDiy_V7"
 

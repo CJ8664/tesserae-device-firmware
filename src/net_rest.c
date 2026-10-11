@@ -505,13 +505,19 @@ static void add_overlay_capability(cJSON *o)
     cJSON_AddNumberToObject(ov, "max_glyphs", 64);
 }
 
+#if BOARD_HAS_TOUCH
 /* Protocol v2 (device-owned touch): sticky server-side, advertised every
- * beat anyway to heal server restarts (proto2 contract, "capability"). */
+ * beat anyway to heal server restarts (proto2 contract, "capability").
+ * Touch boards only. Overlay schema 2 alone already earns the small-change
+ * patches, and proto v2 also tells the server the device draws its own
+ * controls, so the renderer leaves them out of the frame: on a panel with
+ * no touch (the epdiy v7) that would only blank them. */
 static void add_proto_capability(cJSON *o)
 {
     cJSON *p = cJSON_AddObjectToObject(o, "proto");
     if (p) cJSON_AddNumberToObject(p, "v", 2);
 }
+#endif
 
 #if BOARD_TOUCH3
 /* Touch v3 capability (contract §3 / firmware-spec §14). Advertised alongside
@@ -631,7 +637,9 @@ static char *identity_body(uint16_t panel_w, uint16_t panel_h,
     if (advertise_ota) add_frame_cache_capability(o);
 #if BOARD_OVERLAY_PARTIAL
     if (advertise_ota) add_overlay_capability(o);
+#if BOARD_HAS_TOUCH
     if (advertise_ota) add_proto_capability(o);
+#endif
 #if BOARD_TOUCH3
     if (advertise_ota) add_touch3_capability(o);
 #endif
@@ -1165,7 +1173,9 @@ rest_status_t rest_post_status(int rssi, const char *ip,
     add_frame_cache_capability(o);
 #if BOARD_OVERLAY_PARTIAL
     add_overlay_capability(o);
+#if BOARD_HAS_TOUCH
     add_proto_capability(o);
+#endif
 #if BOARD_TOUCH3
     add_touch3_capability(o);   /* every beat: always_on can flip mid-session */
 #endif

@@ -413,13 +413,33 @@ static void always_on_loop(void)
             if (fetch_and_paint_current(c->server_url))
                 last_paint_us = esp_timer_get_time();
         }
+#elif defined(BOARD_OVERLAY_PARTIAL)
+        /* Overlay without touch (the epdiy v7): patches here are the server's
+         * periodic small changes, a clock tick, never the answer to a tap, so
+         * nothing is latency-bound and the SSE stream (built for tap feedback)
+         * is not opened. Instead /frame/data is read just before each frame
+         * poll, on the same cadence. That order matters: the server promotes a
+         * patch whose blob nobody fetched into a full frame on the next /frame
+         * poll, so fetching the blob first is what keeps a clock tick a
+         * partial instead of a full flash. */
+        if (esp_timer_get_time() >= next_poll_us) overlay_linger_poll();
+        if (overlay_take_refetch()) {
+            /* No tap is waiting on this, so the full repaint the contract
+             * falls back to goes through the normal poll and the refresh
+             * floor: drop the ETag so the poll returns 200, and poll now. */
+            rest_config_set_frame_etag("");
+            rest_config_save();
+            next_poll_us = 0;
+        }
+#endif
+#if defined(BOARD_OVERLAY_PARTIAL)
         /* A superseded frame is ordinary new content, so it goes through the
          * normal poll rather than painting here: the poll is conditional and
          * the digest really did change, so it returns 200 without dropping
          * the ETag, and the queued frame still waits on the refresh floor. */
         if (overlay_take_stale()) next_poll_us = 0;
         if (proto2_sync_pending()) proto2_sync_tail();
-#endif /* touch + overlay */
+#endif
 
         /* ---- frame poll ----
          * Polling and repainting are limited by different things and must not
@@ -490,7 +510,9 @@ static void always_on_loop(void)
             if (rest_post_status(current_rssi(), ip, EPD_WIDTH, EPD_HEIGHT,
                                  0, 0, FW_VERSION, &so, 8000) == REST_OK) {
                 if (so.logs_upload) log_capture_upload();
-#if defined(BOARD_HAS_TOUCH) && defined(BOARD_OVERLAY_PARTIAL)
+#if defined(BOARD_OVERLAY_PARTIAL)
+                /* proto2/touch3 calls are no-op stubs on a board without
+                 * touch; values and patches still reach the overlay engine. */
                 if (so.overlay_values[0]) {
                     overlay_ingest_values(so.overlay_values,
                                           strlen(so.overlay_values));
@@ -1479,6 +1501,127 @@ void app_main(void)
 #else
     ESP_LOGW(TAG, "EPD_SELFTEST: done; halting. Press RESET to repeat.");
 #endif
+    while (1) vTaskDelay(pdMS_TO_TICKS(1000));
+#endif
+
+#ifdef EPD_PARTIAL_SELFTEST
+    /* Partial-refresh bring-up for a 4bpp grey panel, no networking: the
+     * checks a photo of a full frame cannot make. A grey ramp goes up first
+     * and must not flash or shift through any of what follows, then a large
+     * digit ticks 0..9 as grey partials and 0..9 as 1-bit partials (ms per
+     * update logged), then a bar is repainted from level 3 to level 11 beside
+     * a bar that was painted 11 by the full refresh: a grey partial that lands
+     * where a full paint does makes the two indistinguishable. Ends with a
+     * full refresh. Enable with -DEPD_PARTIAL_SELFTEST. */
+    ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: partial refresh checks (no networking)");
+    {
+        extern char font8x8_basic[128][8];   /* splash.c owns the array */
+        const int W = EPD_WIDTH, H = EPD_HEIGHT, pitch = EPD_WIDTH / 2;
+        uint8_t *fb = heap_caps_malloc(EPD_BUF_BYTES, TESSERAE_FB_CAPS);
+        if (!fb || epd_active_driver()->info.bpp != 4 || !epd_supports_partial()) {
+            ESP_LOGE(TAG, "EPD_PARTIAL_SELFTEST: needs a 4bpp panel with partial "
+                          "refresh and %u B of PSRAM; halting", (unsigned)EPD_BUF_BYTES);
+            while (1) vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        /* 4bpp, high nibble = left pixel, 0 black .. 15 white. */
+        #define PT_PX(px, py, g) do {                                          \
+            uint8_t *b_ = &fb[(size_t)(py) * pitch + ((px) >> 1)];             \
+            *b_ = ((px) & 1) ? (uint8_t)((*b_ & 0xF0) | (g))                   \
+                             : (uint8_t)((*b_ & 0x0F) | ((g) << 4));           \
+        } while (0)
+        #define PT_FILL(x0, y0, w0, h0, g)                                     \
+            for (int yy_ = (y0); yy_ < (y0) + (h0); yy_++)                     \
+                for (int xx_ = (x0); xx_ < (x0) + (w0); xx_++) PT_PX(xx_, yy_, g)
+
+        /* Top half: 16 ramp bars, black at the left. Bottom half: white, with
+         * the digit box at the left and the two tone bars at the right. */
+        memset(fb, 0xFF, EPD_BUF_BYTES);
+        for (int x = 0; x < W; x++) {
+            uint8_t g = (uint8_t)(x * 16 / W);
+            for (int y = 0; y < H / 2; y++) PT_PX(x, y, g);
+        }
+        const int margin = H / 24;
+        const int box = (H / 2 - 2 * margin) < W / 3 ? (H / 2 - 2 * margin) : W / 3;
+        const int bx = margin, by = H / 2 + margin;
+        const int scale = box / 10;
+        const int gx = bx + (box - 8 * scale) / 2, gy = by + (box - 8 * scale) / 2;
+        const int tw = W / 8, th = H / 2 - 2 * margin, ty = H / 2 + margin;
+        const int ax = W / 2, bbx = W / 2 + W / 4;   /* bar A (changes), bar B */
+        PT_FILL(bx, by, box, box, 12);
+        PT_FILL(ax, ty, tw, th, 3);
+        PT_FILL(bbx, ty, tw, th, 11);
+
+        ESP_ERROR_CHECK(epd_port_init());
+        epd_init();
+        int64_t t0 = esp_timer_get_time();
+        epd_display(fb);
+        ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: base painted in %lld ms. Top: grey "
+                      "ramp, black at the left. Bottom: a light grey box (digits) "
+                      "and two bars, A dark and B light. Watch the ramp: it must "
+                      "not flash or change from here on.",
+                 (esp_timer_get_time() - t0) / 1000);
+        ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: rect-only partials possible: %d",
+                 (int)epd_partial_is_rect_safe(EPD_RF_GC16));
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+        static const epd_refresh_t modes[2] = { EPD_RF_GC16, EPD_RF_DU };
+        static const char *const names[2] = { "grey (GC16)", "1-bit (DU)" };
+        for (int m = 0; m < 2; m++) {
+            ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: digits 0..9 as %s partials%s",
+                     names[m], m == 0
+                         ? ": only the digit's changed pixels flash, the box's "
+                           "grey stays put"
+                         : ": no flash; greys drawn here collapse to black or "
+                           "white, so old strokes may leave white marks in the box");
+            for (int d = 0; d <= 9; d++) {
+                PT_FILL(bx, by, box, box, 12);
+                const char *glyph = font8x8_basic['0' + d];
+                for (int row = 0; row < 8; row++)            /* LSB = leftmost */
+                    for (int col = 0; col < 8; col++)
+                        if ((glyph[row] >> col) & 1)
+                            PT_FILL(gx + col * scale, gy + row * scale,
+                                    scale, scale, 0);
+                t0 = esp_timer_get_time();
+                epd_init();
+                epd_display_partial_mode(fb, bx, by, box, box, modes[m]);
+                ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: %s digit %d in %lld ms",
+                         names[m], d, (esp_timer_get_time() - t0) / 1000);
+                vTaskDelay(pdMS_TO_TICKS(1000));
+            }
+        }
+
+        /* The 1-bit pass left the box's grey as white where strokes were; the
+         * driver knows that, so one grey partial must restore it evenly. */
+        t0 = esp_timer_get_time();
+        epd_init();
+        epd_display_partial_mode(fb, bx, by, box, box, EPD_RF_GC16);
+        ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: box restored by one grey partial in "
+                      "%lld ms: it should be even light grey with a clean 9",
+                 (esp_timer_get_time() - t0) / 1000);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+
+        PT_FILL(ax, ty, tw, th, 11);
+        t0 = esp_timer_get_time();
+        epd_init();
+        epd_display_partial_mode(fb, ax, ty, tw, th, EPD_RF_GC16);
+        ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: bar A repainted 3 -> 11 in %lld ms. "
+                      "A (left) and B (right) should now be the same grey; a "
+                      "visible difference means grey partials land off the "
+                      "full-paint tone. Full refresh in 30 s.",
+                 (esp_timer_get_time() - t0) / 1000);
+        vTaskDelay(pdMS_TO_TICKS(30000));
+
+        t0 = esp_timer_get_time();
+        epd_init();
+        epd_display(fb);
+        epd_sleep();
+        ESP_LOGW(TAG, "EPD_PARTIAL_SELFTEST: full refresh in %lld ms; done, "
+                      "halting. Press RESET to repeat.",
+                 (esp_timer_get_time() - t0) / 1000);
+        #undef PT_FILL
+        #undef PT_PX
+        free(fb);
+    }
     while (1) vTaskDelay(pdMS_TO_TICKS(1000));
 #endif
 
