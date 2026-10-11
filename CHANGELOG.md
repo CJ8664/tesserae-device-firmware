@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.47.0] - 2026-10-11
+
 ### Added
 
 - Partial refresh on the epdiy v7 + ED133UT2 (#39), so a small change such as
@@ -14,13 +16,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pixels that differ: a grey partial runs the full clear and grey matrix on
   those pixels alone, so they land on the same tone as a full paint, and a
   1-bit partial is a few passes of black or white. After a reboot or deep sleep
-  the first partial is a full refresh. The board now advertises overlay
-  schema 2, so the server sends small periodic changes as patches; in always-on
-  mode the firmware fetches them just before each frame poll. It does not
-  advertise proto v2, which would tell the server to leave touch controls out
-  of the frame. The PaperS3 is unchanged. Unverified on glass; flash
-  `epdiy-v7-ed133ut2-partialtest` first: it ticks a digit through both kinds of
-  partial and logs what to look for.
+  the first partial is a full refresh, so partials need the panel set to Stay
+  awake in Tesserae. The board now advertises overlay schema 2, so the server
+  sends small periodic changes as patches; in always-on mode the firmware
+  fetches them just before each frame poll. It does not advertise proto v2,
+  which would tell the server to leave touch controls out of the frame. The
+  PaperS3 is unchanged. Checked on an ED133UT2 with
+  `epdiy-v7-ed133ut2-partialtest`: a grey partial takes about 3 s and a 1-bit
+  partial about 0.36 s, with the rest of the panel left still.
 
 ## [1.46.0] - 2026-10-11
 
