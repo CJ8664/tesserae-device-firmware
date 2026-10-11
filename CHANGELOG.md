@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.46.0] - 2026-10-11
+
 ### Added
 
 - The Waveshare 7.3" e-Paper (F), the 7-colour ACeP glass, on an ESP32-S3
@@ -20,7 +22,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   parallel driver as the PaperS3, a FastEPD port, with the v7's TPS65185 and
   PCA9535 power path and gate timing from FastEPD and the grey matrix and VCOM
   (-2.28 V) tuned for this panel in bitbank2/FastEPD#44. Logs go to the UART
-  with USB as the second console. Unverified on hardware; flash
+  with USB as the second console. The selftest's grey sheets have been seen on
+  a real ED133UT2; a dashboard frame has not yet, so flash
   `epdiy-v7-ed133ut2-selftest` first.
 
 ### Fixed
