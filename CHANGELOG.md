@@ -13,8 +13,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   init values, battery through the PCAL6416A expander (needs JP5 shorted) and
   the GPIO18 wake button. It registers with `rotation: 0`, so the server packs
   frames at the panel's portrait 1200x1600 stride even though the catalog entry
-  for the kind is landscape. Boot, the setup screen and colour are checked on
-  hardware; battery, wake button and deep sleep are not yet.
+  for the kind is landscape. Every panel pin is driven low for 500 ms before
+  power-on, as Soldered's library does, so paints after a deep-sleep wake work
+  (#46), and the slow-refresh warning waits 30 s rather than 10 s since a good
+  refresh takes about 22 s. The build declares the module's octal flash. Boot,
+  colour, battery with JP5 shorted, button and timer wake and deep sleep are
+  checked on hardware; JP5 open and the other board revision are not yet.
 
 - `epdiy-v7-ed133ut2-wholerect`, the v7 build with `EPD_PAR_PARTIAL_WHOLE_RECT`:
   a grey partial drives every pixel of its whole rect through the clear and

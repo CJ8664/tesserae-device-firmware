@@ -9,10 +9,11 @@
  * from Soldered's Inkplate-Arduino-library (Inkplate13SPECTRA/pins.h) and the
  * Soldered-Inkplate-ESPHome inkplate_spi component.
  *
- * On hardware: boots, paints the setup QR and a full-colour frame. Soldered
- * holds DC high under the BS0=0/BS1=1 strap; toggling it per command, as this
- * driver does, works too. Battery, the wake button and deep sleep are not yet
- * checked on the board.
+ * On hardware: boots from octal flash, paints the setup QR and a full-colour
+ * frame, reads the battery with JP5 shorted, wakes on the GPIO18 button and the
+ * timer, and repaints after deep sleep (#46). Soldered holds DC high under the
+ * BS0=0/BS1=1 strap; toggling it per command, as this driver does, works too.
+ * Not yet checked: JP5 open, and the other board revision's divider polarity.
  */
 #pragma once
 
@@ -46,6 +47,8 @@
 /* Soldered's init values and slower power/reset timing. */
 #define EPD_T133_INKPLATE13_INIT 1
 #define EPD_T133_RST_MS          100
+/* A good refresh takes about 22 s here; warn only past 30 s. */
+#define EPD_T133_BUSY_WARN_MS    30000
 
 /* 6-colour Spectra palette indices (nibble values). */
 #define EPD_COL_BLACK   0x0

@@ -255,7 +255,10 @@ static int battery_sample_mv(void);
  * tells them apart by reading the pin as an input first -- a pull-up on the
  * older board makes it read HIGH. Read-modify-write on cfg/out, since other
  * port-1 pins (SD power) live in the same registers.
- * Returns false if the expander does not answer; *active_low is the polarity. */
+ * Returns false if the expander does not answer; *active_low is the polarity.
+ * A failure part-way can leave the pin an input. That is safe: the detection
+ * works because the board's pull holds the switch off while the pin is an
+ * input, on either revision, so the divider stays disconnected. */
 static io_exp_t s_vbat_exp;
 static bool     s_vbat_exp_open;
 

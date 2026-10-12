@@ -202,6 +202,13 @@ static inline void write_cmd_data(uint8_t cmd, const uint8_t *data, size_t len, 
 #define BUSY_CCSET_TIMEOUT_MS    1000
 #define BUSY_RESET_TIMEOUT_MS    5000
 
+/* When a long wait is reported as possibly stuck. A board header may raise it
+ * for glass whose normal refresh runs past 10 s (the Inkplate 13SPECTRA paints
+ * in about 22 s, so 10 s warned on every good refresh). */
+#ifndef EPD_T133_BUSY_WARN_MS
+#define EPD_T133_BUSY_WARN_MS    10000
+#endif
+
 /* Wait for BUSY to read high on BUSY_IDLE_STABLE_SAMPLES consecutive samples
  * or for `timeout_ms` to elapse. Returns false on timeout; callers continue
  * regardless so the panel still reaches POF / DSLP / EN-low. */
@@ -224,8 +231,9 @@ static bool wait_idle(const char *tag, uint32_t timeout_ms)
             vTaskDelay(pdMS_TO_TICKS(BUSY_POLL_MS));
             waited += BUSY_POLL_MS;
         }
-        if (!warned && waited >= 10000 && timeout_ms > 10000) {
-            ESP_LOGW(TAG, "%s: BUSY still low after 10 s; panel may be slow or stuck", tag);
+        if (!warned && waited >= EPD_T133_BUSY_WARN_MS && timeout_ms > EPD_T133_BUSY_WARN_MS) {
+            ESP_LOGW(TAG, "%s: BUSY still low after %u s; panel may be slow or stuck", tag,
+                     (unsigned)(EPD_T133_BUSY_WARN_MS / 1000));
             warned = true;
         }
         if (waited >= timeout_ms) {

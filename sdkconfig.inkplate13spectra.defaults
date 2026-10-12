@@ -3,3 +3,6 @@
 # already fits, the rest of flash stays reserved for future data partitions.
 CONFIG_ESPTOOLPY_FLASHSIZE_32MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE="32MB"
+# The module's flash is octal (esptool flash_id: mxic, opi). Without this the
+# build says dio and the boot log warns before switching to octal itself.
+CONFIG_ESPTOOLPY_OCT_FLASH=y
