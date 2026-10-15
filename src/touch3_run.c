@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "cJSON.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"   /* PSRAM feedback scratch buffer */
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -52,7 +53,9 @@ extern uint64_t app_next_event_id(void);
 
 /* ---- state (statics: the linger call chain must stay off the stack) ---- */
 
-static t3_spec_t s_spec;
+/* These CPU-only specs must be off the task stack, but need not occupy
+ * internal RAM either. EXT_RAM_BSS_ATTR is empty on non-opted-in boards. */
+EXT_RAM_BSS_ATTR static t3_spec_t s_spec;
 static bool      s_have_spec;
 static uint8_t  *s_atlas_bits[T3_MAX_ATLASES];
 static char      s_glass_layout[T3_DIGEST_CAP];   /* layout on glass */
@@ -298,7 +301,7 @@ static bool adopt_spec(const char *json, size_t len, bool cache, bool allow_net)
      * which made it look like a logging bug rather than a stack bug.
      * adopt_spec is only ever called from the single wake/boot path, so a
      * static scratch is safe and keeps the cost off the stack entirely. */
-    static t3_spec_t parsed;
+    EXT_RAM_BSS_ATTR static t3_spec_t parsed;
     if (!t3_spec_parse(json, len, EPD_WIDTH, EPD_HEIGHT, &parsed)) {
         ESP_LOGW(TAG, "spec parse failed (%u bytes)", (unsigned)len);
         return false;

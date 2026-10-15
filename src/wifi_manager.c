@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "memory_diag.h"
 #include "panel/busy_sleep.h"
 #include "app_config.h"
 
@@ -115,7 +116,9 @@ esp_err_t wifi_manager_init(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    memory_diag("before wifi init");
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    memory_diag("after wifi init");
 
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         WIFI_EVENT, ESP_EVENT_ANY_ID, &on_event, NULL, NULL));

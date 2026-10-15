@@ -1,4 +1,5 @@
 #include "ble_setup.h"
+#include "memory_diag.h"
 #include "led.h"
 #include "panel/busy_sleep.h"
 
@@ -711,7 +712,9 @@ static bool prepare_session(void)
 
 static bool start_ble(void)
 {
+    memory_diag("before nimble init");
     esp_err_t err = nimble_port_init();
+    memory_diag("after nimble init");
     if (err != ESP_OK) { ESP_LOGE(TAG, "nimble init failed: %s", esp_err_to_name(err)); return false; }
     s_nimble_initialized = true;
     ble_hs_cfg.reset_cb = NULL;
@@ -730,6 +733,7 @@ static bool start_ble(void)
     ble_svc_gap_device_name_set("Tesserae");
     nimble_port_freertos_init(host_task);
     s_host_started = true;
+    memory_diag("BLE host started");
     return true;
 }
 
@@ -812,6 +816,7 @@ static void scrub_session(void)
 ble_setup_result_t ble_setup_run(ble_setup_mode_t mode, uint32_t timeout_s)
 {
     bool button_exit = false;
+    memory_diag("BLE session entry");
     epd_light_sleep_set_ble(true);   /* no light sleep under a live BLE host */
     led_blink(100, 1000);            /* slow blink: setup session open */
     s_mode = mode;
@@ -837,6 +842,7 @@ ble_setup_result_t ble_setup_run(ble_setup_mode_t mode, uint32_t timeout_s)
      * timeout. Make the session visible first, then start the BLE tasks. */
     splash_show_ble_setup(s_qr_payload, s_passkey,
                           mode == BLE_SETUP_MODE_MAINTENANCE);
+    memory_diag("BLE splash complete");
 
     if (xTaskCreate(worker_task, "ble_setup_work", 7168, NULL, 5, &s_worker) != pdPASS ||
         !start_ble()) {

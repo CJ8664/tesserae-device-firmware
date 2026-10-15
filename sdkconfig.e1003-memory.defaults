@@ -1,0 +1,5 @@
+# The E1003's touch specifications and REST response buffer need ordinary
+# byte-addressable storage, not internal/DMA RAM. Keep them in its 8 MB PSRAM
+# so Wi-Fi, the IT8951 SPI DMA path and the BLE controller can coexist.
+# IDF also relocates supported Wi-Fi/Bluetooth library BSS with this option.
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y

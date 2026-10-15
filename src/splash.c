@@ -23,6 +23,7 @@
 #include <string.h>
 
 #include "esp_heap_caps.h"
+#include "memory_diag.h"
 #include "esp_log.h"
 
 #include "qrcodegen.h"
@@ -272,6 +273,7 @@ static esp_err_t render_and_paint(void (*draw)(void), const char *label)
 
     ESP_LOGI(TAG, "painting %s splash (%dx%d, ~30 s)...", label, s_W, s_H);
     epd_init();
+    memory_diag("splash panel initialized");
     epd_display(s_fb);
     epd_sleep();
 

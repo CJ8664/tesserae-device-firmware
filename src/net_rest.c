@@ -41,6 +41,7 @@
 #include <time.h>
 
 #include "cJSON.h"
+#include "esp_attr.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
@@ -60,7 +61,9 @@ static const char *TAG = "rest";
 typedef struct { const char *name, *value; } rest_hdr_t;
 
 /* ---- per-request capture (single request at a time) ---- */
-static char     s_rx[REST_RX_MAX + 1];
+/* CPU-only HTTP/JSON storage; boards opting into external BSS keep the
+ * 32 KB buffer out of the scarce internal/DMA heap. */
+EXT_RAM_BSS_ATTR static char s_rx[REST_RX_MAX + 1];
 static size_t   s_rx_len;
 static bool     s_overflow;
 static char     s_etag[80];
