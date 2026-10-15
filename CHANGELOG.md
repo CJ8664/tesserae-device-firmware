@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.48.0] - 2026-10-15
+
 ### Added
 
 - Soldered Inkplate 13SPECTRA (`soldered-inkplate-13spectra`): the 13.3"
