@@ -108,7 +108,7 @@ static bool serve_page_from_sd(const char *target)
 
     /* The manifest's bytes field is the wire size for this kind; a frame that
      * is not exactly this panel's buffer cannot be painted here. */
-    if (p->bytes != EPD_BUF_BYTES) {
+    if (!epd_frame_bytes_ok(p->bytes)) {
         ESP_LOGW(TAG, "page '%s' is %u bytes, panel wants %u; network fallback",
                  target, (unsigned)p->bytes, (unsigned)EPD_BUF_BYTES);
         return false;
@@ -132,7 +132,7 @@ static bool serve_page_from_sd(const char *target)
         s_panel_up = true;
     }
     epd_init();
-    epd_display(frame);
+    epd_display_frame(frame, p->bytes);
     epd_sleep();
     free(frame);
 

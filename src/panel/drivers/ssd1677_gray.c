@@ -645,6 +645,30 @@ static void ssd1677_display(const uint8_t *image)
     bus_release();
 }
 
+#if defined(EPD_MONO) && defined(EPD_DUAL_DEPTH)
+/* A 2bpp frame on a board whose native frame is 1bpp (EPD_DUAL_DEPTH, the
+ * X4). init() is shared and already writes the 4-gray temperature selection;
+ * a mono refresh simply reloads the measured one over it. So a grey paint
+ * puts RAM2 back in play (the mono path bypasses it), sends both planes as the
+ * 4-gray build does, re-selects the 4-gray border and temperature, and
+ * refreshes with the 4-gray update byte. No shadow and no partials: the dual
+ * build stays a mono build in every other respect. */
+static void ssd1677_display_gray(const uint8_t *image)
+{
+    bus_hold();
+    static const uint8_t CTRL1_NORMAL[] = {0x00};
+    cmd_data(SSD_CTRL1, CTRL1_NORMAL, sizeof CTRL1_NORMAL);
+    gray_send_plane(SSD_DTM1, image, 1);
+    gray_send_plane(SSD_DTM2, image, 2);
+    static const uint8_t TW[] = {EPD_SSD1677_GRAY_TEMP, 0x00};
+    static const uint8_t BG[] = {SSD_BORDER_GRAY};
+    cmd_data(SSD_BORDER, BG, sizeof BG);
+    cmd_data(SSD_TEMP_WRITE, TW, sizeof TW);
+    trigger_refresh();
+    bus_release();
+}
+#endif
+
 static void ssd1677_clear(uint8_t color)
 {
     bus_hold();
@@ -714,6 +738,27 @@ static void ssd1677_show_color_bars(void)
 
     ssd1677_display(frame);
     free(frame);
+
+#if defined(EPD_DUAL_DEPTH) && defined(EPD_SELFTEST)
+    /* Dual-depth: then the 4-gray ramp through display_gray, black, dark,
+     * light, white from the top, with the same white wedge. Even steps between
+     * the two greys are what this pass judges. */
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    uint8_t *gray = malloc(EPD_GRAY_BUF_BYTES);
+    if (!gray) return;
+    static const uint8_t LEVEL_BYTE[4] = {0x00, 0x55, 0xAA, 0xFF};
+    const int gstride = EPD_WIDTH / 4;
+    for (int fy = 0; fy < EPD_HEIGHT; fy++) {
+        int band = fy / BAND_H;
+        if (band > 3) band = 3;
+        memset(gray + (size_t)fy * gstride, LEVEL_BYTE[band], gstride);
+    }
+    for (int fy = 0; fy < WEDGE; fy++)
+        memset(gray + (size_t)fy * gstride, 0xff, WEDGE / 4);
+    ssd1677_init();
+    ssd1677_display_gray(gray);
+    free(gray);
+#endif
 }
 
 /* Transport check: alternating pixels across the whole frame. */
@@ -1050,6 +1095,9 @@ const epd_driver_t ssd1677_gray_driver = {
     .init               = ssd1677_init,
     .clear              = ssd1677_clear,
     .display            = ssd1677_display,
+#if defined(EPD_MONO) && defined(EPD_DUAL_DEPTH)
+    .display_gray       = ssd1677_display_gray,
+#endif
     .show_color_bars    = ssd1677_show_color_bars,
     .show_palette_sweep = ssd1677_show_palette_sweep,
     .sleep              = ssd1677_sleep,

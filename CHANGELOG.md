@@ -6,6 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Dual-depth firmware for six mono panels: the Elecrow CrowPanel 5.79", the
+  Seeed XIAO ePaper 7.5" kit, the XIAO 7.5" ePaper Panel (C3), the EE04 with
+  the 7.5" mono panel, the Waveshare ESP32 Driver Board 7.5" and the Xteink
+  X4. Each board's existing build now paints a 4-level grey frame as well as
+  its mono one, picked by the frame's length, and lists
+  `"gamuts": ["mono", "gray_4"]` on register and every status beat so the
+  server knows it may send either. A mono frame paints exactly as before, so
+  existing devices take this as a normal update and change nothing until the
+  server is set to send them grey. Same envs, same kinds, same OTA lineage;
+  no reflash.
+  - New optional driver entry point `display_gray`, and
+    `epd_frame_bytes_ok()` / `epd_display_frame()` so the server, relay, deck
+    and Album paths accept either length and route by it.
+  - CrowPanel: `ssd1683_dual` uploads a 4-gray waveform for a grey frame and
+    writes both RAM planes. The waveform, rails and plane encoding are Good
+    Display's set for their SSD1683 4.2" glass, so this panel may need LUT
+    tuning. Grey frame 53856 bytes.
+  - The four UC8179 7.5" boards: `mono_spi` compiles the E1001's 4-gray path
+    beside its 1bpp one, probing the glass for its waveform on the first grey
+    paint only. Grey frame 96000 bytes.
+  - X4: `ssd1677_gray` paints a grey frame through its 4-gray path while the
+    build stays mono in every other respect. Grey frame 96000 bytes, the
+    bytes CrossInk paints for `xteink_x4_gray`.
+  - Each board's `-selftest` env shows the grey ramp. None of the grey paths
+    is checked on hardware yet, and on the C3 and classic-ESP32 boards
+    (no PSRAM) a grey frame needs twice the mono buffer of internal RAM,
+    which is also unchecked. Relay-paired panels keep mono: the pairing
+    report carries one gamut.
+
 ## [1.49.0] - 2026-10-20
 
 ### Added

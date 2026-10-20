@@ -9,6 +9,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include "esp_err.h"
 #include "app_config.h"
 
@@ -29,6 +30,18 @@ void epd_clear(uint8_t color);
  * next 300 to the right (CS_S), so callers just produce a single
  * contiguous buffer. */
 void epd_display(const uint8_t *image);
+
+/* Frames that arrive from the server, the relay or the SD caches carry their
+ * own length. On an EPD_DUAL_DEPTH board two lengths are valid: EPD_BUF_BYTES
+ * (1bpp mono, painted exactly as before) and EPD_GRAY_BUF_BYTES (2bpp, painted
+ * through the driver's 4-gray path). Everywhere else only EPD_BUF_BYTES is.
+ * epd_display_frame() routes by length; callers validate with
+ * epd_frame_bytes_ok() first. */
+bool epd_frame_bytes_ok(size_t n);
+void epd_display_frame(const uint8_t *image, size_t n);
+/* True when this firmware can paint 4-level grey frames as well as mono, so
+ * the server may choose either per device (advertised as "gamuts"). */
+bool epd_supports_gray(void);
 
 /* Paint the 6 panel colours as horizontal bands, top to bottom in palette
  * order (black, white, yellow, red, blue, green). The user-facing splash

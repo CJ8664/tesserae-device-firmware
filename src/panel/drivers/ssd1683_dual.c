@@ -18,6 +18,10 @@
  * Opcodes reach both chips; the slave's own copies (bit 7 set) reach only the
  * slave. So the master's window and plane go first and the slave's follow,
  * overwriting what the broadcast put in the slave's RAM.
+ *
+ * EPD_DUAL_DEPTH builds also take a 2bpp frame (display_gray) and drive both
+ * RAM planes through an uploaded 4-gray waveform; see the gray section below.
+ * A 1bpp frame paints exactly as it does on a mono-only build.
  */
 #include "app_config.h"          /* board.h -> PANEL_DRIVER_* selection */
 
@@ -49,6 +53,15 @@ static const char *TAG = "epd_ssd1683";
 #define SSD_RAM_Y_ADDR  0x4f
 #define SSD_TEMP_SENSOR 0x18
 #define SSD_BW_RAM      0x24
+#define SSD_RED_RAM     0x26
+#define SSD_DRIVER_OUT  0x01
+#define SSD_GATE_V      0x03
+#define SSD_SOURCE_V    0x04
+#define SSD_BOOST       0x0c
+#define SSD_VCOM        0x2c
+#define SSD_LUT         0x32
+#define SSD_BORDER      0x3c
+#define SSD_END_OPT     0x3f
 #define SSD_UPD_CTRL1   0x21
 #define SSD_UPD_CTRL2   0x22
 #define SSD_TRIGGER     0x20
@@ -62,6 +75,68 @@ static const char *TAG = "epd_ssd1683";
  * datasheet requires when the two chips share the master's clock on CL.
  * Elecrow's examples leave this at POR; GxEPD2 sets it. */
 static const uint8_t UPD_CTRL1_FULL[] = {0x40, 0x10};
+
+#ifdef EPD_DUAL_DEPTH
+/* ---------- 4-level grayscale (display_gray) ----------
+ *
+ * The SSD1683 has no built-in 4-gray waveform on this glass, so the waveform
+ * is uploaded to the LUT register and the refresh runs from it (update 0xCF:
+ * no temperature or OTP LUT load). Both RAMs are live, so update control 1
+ * drops the red-RAM bypass and keeps the cascade bit.
+ *
+ * Waveform, voltages and plane encoding are Good Display's 4-gray set for
+ * their SSD1683 4.2" glass, as Adafruit_EPD ships it for that panel
+ * (ThinkInk_420_Grayscale4_MFGN.h): 227 LUT bytes to 0x32, then the
+ * end-option, gate, source and VCOM bytes that follow them in Good Display's
+ * 233-byte tables. The CrowPanel's GDEY0579T93 is the same vendor and
+ * controller but not the same glass, so these are the starting point for a
+ * bench pass rather than a measured result.
+ *
+ * Plane bits for the frame's level g (0 = black .. 3 = white), from Adafruit's
+ * layer table (white 00, light 01, dark 10, black 11 with both buffers
+ * inverted, buffer 0 -> 0x24, buffer 1 -> 0x26):
+ *
+ *        white  light-gray  dark-gray  black         (g = 3    2    1    0)
+ *   0x24:  1        0           1        0           (bit =  g       & 1)
+ *   0x26:  1        1           0        0           (bit = (g >> 1) & 1)
+ */
+static const uint8_t UPD_CTRL1_GRAY[] = {0x00, 0x10};
+#define SSD_UPD_GRAY    0xcf
+
+static const uint8_t LUT_4G[227] = {
+    0x01, 0x0A, 0x1B, 0x0F, 0x03, 0x01, 0x01, 0x05, 0x0A, 0x01, 0x0A, 0x01,
+    0x01, 0x01, 0x05, 0x08, 0x03, 0x02, 0x04, 0x01, 0x01, 0x01, 0x04, 0x04,
+    0x02, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x0A, 0x1B, 0x0F, 0x03, 0x01,
+    0x01, 0x05, 0x4A, 0x01, 0x8A, 0x01, 0x01, 0x01, 0x05, 0x48, 0x03, 0x82,
+    0x84, 0x01, 0x01, 0x01, 0x84, 0x84, 0x82, 0x00, 0x01, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
+    0x01, 0x0A, 0x1B, 0x8F, 0x03, 0x01, 0x01, 0x05, 0x4A, 0x01, 0x8A, 0x01,
+    0x01, 0x01, 0x05, 0x48, 0x83, 0x82, 0x04, 0x01, 0x01, 0x01, 0x04, 0x04,
+    0x02, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x8A, 0x1B, 0x8F, 0x03, 0x01,
+    0x01, 0x05, 0x4A, 0x01, 0x8A, 0x01, 0x01, 0x01, 0x05, 0x48, 0x83, 0x02,
+    0x04, 0x01, 0x01, 0x01, 0x04, 0x04, 0x02, 0x00, 0x01, 0x01, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01,
+    0x01, 0x8A, 0x9B, 0x8F, 0x03, 0x01, 0x01, 0x05, 0x4A, 0x01, 0x8A, 0x01,
+    0x01, 0x01, 0x05, 0x48, 0x03, 0x42, 0x04, 0x01, 0x01, 0x01, 0x04, 0x04,
+    0x42, 0x00, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01,
+    0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+};
+static const uint8_t END_OPT_4G[] = {0x07};
+static const uint8_t GATE_V_4G[]  = {0x17};
+static const uint8_t SRC_V_4G[]   = {0x41, 0xA8, 0x32};
+static const uint8_t VCOM_4G[]    = {0x30};
+static const uint8_t BOOST_4G[]   = {0x8B, 0x9C, 0xA4, 0x0F};
+static const uint8_t BORDER_4G[]  = {0x03};
+
+#define PLANE_BIT(g, plane) ((plane) == 1 ? ((g) & 1) : (((g) >> 1) & 1))
+
+/* A grey paint leaves the border, booster and rails at the 4-gray values;
+ * the next mono paint in the same wake re-inits so it gets its own. */
+static bool s_gray_dirty = false;
+#endif /* EPD_DUAL_DEPTH */
 
 /* Controller geometry. */
 #define CHIP_BYTES      50                       /* 400 sources / 8 */
@@ -159,16 +234,28 @@ static void bus_release(void) { spi_device_release_bus(s_spi); }
 
 /* ---------- frame -> controller buffer ---------- */
 
-static inline int frame_bit(const uint8_t *image, int fx, int fy)
+/* The plane bit (1 = white side) a frame pixel contributes. plane 0 reads a
+ * 1bpp frame, whose bit is the BW RAM bit directly; planes 1 (0x24) and 2
+ * (0x26) read a 2bpp frame, whose level splits across the two RAMs. */
+static inline int frame_bit(const uint8_t *image, int fx, int fy, int plane)
 {
+#ifdef EPD_DUAL_DEPTH
+    if (plane) {
+        const uint8_t b = image[(size_t)fy * (EPD_WIDTH / 4) + (fx >> 2)];
+        const uint8_t g = (uint8_t)((b >> ((3 - (fx & 3)) * 2)) & 0x3);
+        return PLANE_BIT(g, plane);
+    }
+#endif
     return (image[(size_t)fy * (EPD_WIDTH / 8) + (fx >> 3)] >> (7 - (fx & 7))) & 1;
 }
 
-/* Build buffer row r (BUF_BYTES_ROW bytes, seam white) from the frame, or a
- * solid fill when image is NULL. Unrotated, buffer column bx shows frame
- * column bx left of the seam and bx - 8 right of it, frame row r. Rotated,
- * the frame is turned 180 degrees first, which is Elecrow's Rotation 180. */
-static void build_row(const uint8_t *image, uint8_t fill, int r, uint8_t *out)
+/* Build buffer row r (BUF_BYTES_ROW bytes, seam white) of one plane from the
+ * frame, or a solid fill when image is NULL. Unrotated, buffer column bx shows
+ * frame column bx left of the seam and bx - 8 right of it, frame row r.
+ * Rotated, the frame is turned 180 degrees first, which is Elecrow's Rotation
+ * 180. */
+static void build_row(const uint8_t *image, uint8_t fill, int r, int plane,
+                      uint8_t *out)
 {
     if (!image) {
         memset(out, fill, BUF_BYTES_ROW);
@@ -180,7 +267,7 @@ static void build_row(const uint8_t *image, uint8_t fill, int r, uint8_t *out)
         if (bx >= SEAM_X && bx < SEAM_X + SEAM_W) continue;
         int x = (bx < SEAM_X) ? bx : bx - SEAM_W;
         int fx = EPD_ROTATE_180 ? (EPD_WIDTH - 1 - x) : x;
-        if (!frame_bit(image, fx, fy))
+        if (!frame_bit(image, fx, fy, plane))
             out[bx >> 3] &= (uint8_t)~(1u << (7 - (bx & 7)));
     }
 }
@@ -203,27 +290,33 @@ static void set_window(bool slave)
     cmd_data(SSD_RAM_Y_ADDR | s, yaddr, sizeof yaddr);
 }
 
-/* Write one chip's BW plane: buffer row r, master half or slave half. */
-static void send_plane(const uint8_t *image, uint8_t fill, bool slave)
+/* Write one chip's half of a RAM plane, master or slave. plane 0 is a 1bpp
+ * frame into BW RAM (0x24); planes 1 and 2 are a 2bpp frame's halves, into
+ * 0x24 and the red RAM (0x26). */
+static void send_plane(const uint8_t *image, uint8_t fill, bool slave, int plane)
 {
     uint8_t row[BUF_BYTES_ROW];
 
     set_window(slave);
     gpio_set_level(EPD_PIN_CS, 0);
-    send_cmd(SSD_BW_RAM | (slave ? SSD_SLAVE : 0));
+    send_cmd((plane == 2 ? SSD_RED_RAM : SSD_BW_RAM) | (slave ? SSD_SLAVE : 0));
     for (int r = 0; r < GATES; r++) {
-        build_row(image, fill, r, row);
+        build_row(image, fill, r, plane, row);
         send_data(row + (slave ? CHIP_BYTES : 0), CHIP_BYTES);
     }
     gpio_set_level(EPD_PIN_CS, 1);
 }
 
+static void ssd1683_init(void);
+
 static void paint(const uint8_t *image, uint8_t fill, const char *what)
 {
+#ifdef EPD_DUAL_DEPTH
+    if (s_gray_dirty) { ssd1683_init(); s_gray_dirty = false; }
+#endif
     bus_hold();
-    send_plane(image, fill, false);
-    send_plane(image, fill, true);
-
+    send_plane(image, fill, false, 0);
+    send_plane(image, fill, true, 0);
     cmd_data(SSD_UPD_CTRL1, UPD_CTRL1_FULL, sizeof UPD_CTRL1_FULL);
     const uint8_t upd[] = {SSD_UPD_FULL};
     int64_t t0 = esp_timer_get_time();
@@ -234,6 +327,41 @@ static void paint(const uint8_t *image, uint8_t fill, const char *what)
              (long long)((esp_timer_get_time() - t0) / 1000));
     bus_release();
 }
+
+#ifdef EPD_DUAL_DEPTH
+/* A 2bpp frame (or, with image NULL, a solid level from the two plane fills)
+ * through the uploaded 4-gray waveform. The waveform and rails are broadcast
+ * to both chips just before the planes; SWRESET in the next init clears them,
+ * so the next mono paint is untouched. */
+static void paint_gray(const uint8_t *image, uint8_t fill1, uint8_t fill2,
+                       const char *what)
+{
+    bus_hold();
+    cmd_data(SSD_BORDER,   BORDER_4G,  sizeof BORDER_4G);
+    cmd_data(SSD_BOOST,    BOOST_4G,   sizeof BOOST_4G);
+    cmd_data(SSD_LUT,      LUT_4G,     sizeof LUT_4G);
+    cmd_data(SSD_END_OPT,  END_OPT_4G, sizeof END_OPT_4G);
+    cmd_data(SSD_GATE_V,   GATE_V_4G,  sizeof GATE_V_4G);
+    cmd_data(SSD_SOURCE_V, SRC_V_4G,   sizeof SRC_V_4G);
+    cmd_data(SSD_VCOM,     VCOM_4G,    sizeof VCOM_4G);
+
+    send_plane(image, fill1, false, 1);
+    send_plane(image, fill1, true, 1);
+    send_plane(image, fill2, false, 2);
+    send_plane(image, fill2, true, 2);
+
+    cmd_data(SSD_UPD_CTRL1, UPD_CTRL1_GRAY, sizeof UPD_CTRL1_GRAY);
+    const uint8_t upd[] = {SSD_UPD_GRAY};
+    int64_t t0 = esp_timer_get_time();
+    cmd_data(SSD_UPD_CTRL2, upd, sizeof upd);
+    cmd_data(SSD_TRIGGER, NULL, 0);
+    wait_idle();
+    ESP_LOGI(TAG, "%s done (4-gray, %lld ms)", what,
+             (long long)((esp_timer_get_time() - t0) / 1000));
+    bus_release();
+    s_gray_dirty = true;
+}
+#endif /* EPD_DUAL_DEPTH */
 
 /* ---------- driver entry points ---------- */
 
@@ -311,6 +439,13 @@ static void ssd1683_display(const uint8_t *image)
     paint(image, 0, "refresh");
 }
 
+#ifdef EPD_DUAL_DEPTH
+static void ssd1683_display_gray(const uint8_t *image)
+{
+    paint_gray(image, 0, 0, "refresh");
+}
+#endif
+
 static void ssd1683_clear(uint8_t color)
 {
     paint(NULL, (color & 1) ? 0xff : 0x00, "clear");
@@ -326,6 +461,45 @@ static void ssd1683_clear(uint8_t color)
  *   wedge top-right or bottom-left   -> one axis is mirrored; the RAM
  *                                       directions in set_window are wrong
  *   a break or doubled column at mid-width -> the seam is off */
+#if defined(EPD_DUAL_DEPTH) && defined(EPD_SELFTEST)
+/* Bring-up, gray: four bands black, dark gray, light gray, white from the top,
+ * a white wedge in the black band's top-left corner, and 1px black/white
+ * stripes in the white band's left half. Even steps between the two greys are
+ * the tuning target; the wedge and seam checks are the mono ones. */
+static void ssd1683_show_color_bars(void)
+{
+    uint8_t *frame = malloc(EPD_GRAY_BUF_BYTES);
+    if (!frame) return;
+    const int BAND_H = EPD_HEIGHT / 4;
+    const int stride = EPD_WIDTH / 4;
+    static const uint8_t LEVEL_BYTE[4] = {0x00, 0x55, 0xAA, 0xFF};
+
+    for (int fy = 0; fy < EPD_HEIGHT; fy++) {
+        int band = fy / BAND_H;
+        if (band > 3) band = 3;
+        memset(frame + (size_t)fy * stride, LEVEL_BYTE[band], stride);
+    }
+    for (int fy = 3 * BAND_H; fy < EPD_HEIGHT; fy++)
+        memset(frame + (size_t)fy * stride, 0x33, stride / 2);   /* black, white, ... */
+
+    const int WEDGE = 48;   /* px, a multiple of 4 */
+    for (int fy = 0; fy < WEDGE; fy++)
+        memset(frame + (size_t)fy * stride, 0xff, WEDGE / 4);
+
+    ssd1683_display_gray(frame);
+    free(frame);
+}
+
+/* Transport check: alternating black and white pixels across the frame. */
+static void ssd1683_show_palette_sweep(void)
+{
+    uint8_t *frame = malloc(EPD_GRAY_BUF_BYTES);
+    if (!frame) return;
+    memset(frame, 0x33, EPD_GRAY_BUF_BYTES);   /* black, white, black, white */
+    ssd1683_display_gray(frame);
+    free(frame);
+}
+#else
 static void ssd1683_show_color_bars(void)
 {
     uint8_t *frame = malloc(EPD_BUF_BYTES);
@@ -366,6 +540,7 @@ static void ssd1683_show_palette_sweep(void)
     ssd1683_display(frame);
     free(frame);
 }
+#endif /* EPD_DUAL_DEPTH && EPD_SELFTEST */
 
 static void ssd1683_sleep(void)
 {
@@ -380,16 +555,19 @@ static void ssd1683_sleep(void)
 const epd_driver_t ssd1683_dual_driver = {
     .info = {
         .name      = "SSD1683 x2 5.79\" (792x272, mono 1bpp)",
+        .bpp       = 1,
+        .grayscale = false,
         .width     = EPD_WIDTH,
         .height    = EPD_HEIGHT,
-        .bpp       = 1,
         .buf_bytes = EPD_BUF_BYTES,
-        .grayscale = false,
     },
     .port_init          = ssd1683_port_init,
     .init               = ssd1683_init,
     .clear              = ssd1683_clear,
     .display            = ssd1683_display,
+#ifdef EPD_DUAL_DEPTH
+    .display_gray       = ssd1683_display_gray,
+#endif
     .show_color_bars    = ssd1683_show_color_bars,
     .show_palette_sweep = ssd1683_show_palette_sweep,
     .sleep              = ssd1683_sleep,

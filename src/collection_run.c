@@ -179,7 +179,7 @@ static bool paint_next_from_sd(void)
         return true;
     }
     const fc_frame_t *f = &s_manifest->frames[index];
-    if (f->bytes != EPD_BUF_BYTES) {
+    if (!epd_frame_bytes_ok(f->bytes)) {
         force_resync("cached frame dimensions do not match this panel");
         return false;
     }
@@ -204,7 +204,7 @@ static bool paint_next_from_sd(void)
         return false;
     }
     epd_init();
-    epd_display(frame);
+    epd_display_frame(frame, f->bytes);
     epd_sleep();
     free(frame);
     report("playing");
@@ -324,7 +324,7 @@ void collection_sync_tail(bool present, const char *id, const char *kind,
         return;
     }
     for (int i = 0; i < m->n_frames; i++) {
-        if (m->frames[i].bytes != EPD_BUF_BYTES) {
+        if (!epd_frame_bytes_ok(m->frames[i].bytes)) {
             ESP_LOGW(TAG, "frame '%s' is %u bytes; panel requires %u",
                      m->frames[i].frame_id, (unsigned)m->frames[i].bytes,
                      (unsigned)EPD_BUF_BYTES);

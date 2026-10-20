@@ -37,6 +37,16 @@
 #define EPD_HEIGHT     272
 #define EPD_BUF_BYTES  ((EPD_WIDTH * EPD_HEIGHT) / 8)
 
+/* Dual depth: this firmware also paints 4-level grey frames, 2bpp packed, 4
+ * px/byte MSB-first, 0b00 = black .. 0b11 = white, 53856 bytes. The frame's
+ * length picks the path, and the server sends grey only to devices that
+ * advertise it ("gamuts" on register and status) and are set to grey, so a
+ * mono frame paints exactly as before. The grey path is unverified on this
+ * glass; the -selftest env paints the grey ramp.
+ */
+#define EPD_DUAL_DEPTH      1
+#define EPD_GRAY_BUF_BYTES  ((EPD_WIDTH * EPD_HEIGHT) / 4)   /* 2bpp = 53856 */
+
 /* Elecrow's examples all draw at their Rotation 180, so that is taken as
  * upright until the selftest says otherwise: its white wedge should land in
  * the top-left corner. If it lands bottom-right, set this to 0. */

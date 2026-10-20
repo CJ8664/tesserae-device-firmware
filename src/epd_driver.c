@@ -10,6 +10,15 @@
 #include "epd_driver.h"
 #include "panel/epd_panel.h"
 
+/* A dual-depth frame can be either length, and the overlay and touch engines
+ * copy and patch exactly EPD_BUF_BYTES. No dual-depth board has either today;
+ * one that gains them needs those buffers sized to the frame first. */
+#if defined(EPD_GRAY_BUF_BYTES) && \
+    ((defined(BOARD_OVERLAY_PARTIAL) && BOARD_OVERLAY_PARTIAL) || \
+     (defined(BOARD_HAS_TOUCH) && BOARD_HAS_TOUCH))
+#error "EPD_DUAL_DEPTH is not yet supported alongside overlay or touch"
+#endif
+
 esp_err_t epd_port_init(void)          { return epd_active_driver()->port_init(); }
 void epd_init(void)                    { epd_active_driver()->init(); }
 void epd_clear(uint8_t color)          { epd_active_driver()->clear(color); }
@@ -17,6 +26,38 @@ void epd_display(const uint8_t *image) { epd_active_driver()->display(image); }
 void epd_show_color_bars(void)         { epd_active_driver()->show_color_bars(); }
 void epd_show_palette_sweep(void)      { epd_active_driver()->show_palette_sweep(); }
 void epd_sleep(void)                   { epd_active_driver()->sleep(); }
+
+bool epd_supports_gray(void)
+{
+#ifdef EPD_GRAY_BUF_BYTES
+    return epd_active_driver()->display_gray != NULL;
+#else
+    return false;
+#endif
+}
+
+bool epd_frame_bytes_ok(size_t n)
+{
+    if (n == (size_t)EPD_BUF_BYTES) return true;
+#ifdef EPD_GRAY_BUF_BYTES
+    if (n == (size_t)EPD_GRAY_BUF_BYTES && epd_supports_gray()) return true;
+#endif
+    return false;
+}
+
+void epd_display_frame(const uint8_t *image, size_t n)
+{
+#ifdef EPD_GRAY_BUF_BYTES
+    const epd_driver_t *d = epd_active_driver();
+    if (n == (size_t)EPD_GRAY_BUF_BYTES && d->display_gray) {
+        d->display_gray(image);
+        return;
+    }
+#else
+    (void)n;
+#endif
+    epd_display(image);
+}
 
 /* Partial refresh (overlay feature). Supported only where the active driver
  * provides display_partial; callers must check epd_supports_partial(). */

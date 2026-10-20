@@ -55,6 +55,25 @@
 
 static const char *TAG = "epd_mono";
 
+/* The 4-gray machinery (LUTs, plane encoding, init) is compiled for EPD_GRAY4
+ * builds, which paint only grey, and for EPD_DUAL_DEPTH builds, which keep the
+ * 1bpp path exactly as it is and add a grey one beside it (display_gray). */
+#if defined(EPD_GRAY4) || (defined(EPD_DUAL_DEPTH) && !defined(EPD_BWR))
+#define GRAY4_PATH 1
+#else
+#define GRAY4_PATH 0
+#endif
+#if defined(EPD_DUAL_DEPTH) && !defined(EPD_GRAY4) && !defined(EPD_BWR)
+#define DUAL_DEPTH 1
+#else
+#define DUAL_DEPTH 0
+#endif
+#if DUAL_DEPTH
+/* Set by a grey paint until the next mono one; sleep floats the border after
+ * it, as the 4-gray build always does. */
+static bool s_last_paint_gray = false;
+#endif
+
 /* UC8179 opcodes */
 #define PSR   0x00
 #define PWR   0x01
@@ -921,9 +940,10 @@ static void mono_ensure(panel_mode_t want)
 }
 #endif /* MONO_1BPP */
 
-#ifdef EPD_GRAY4
+#if GRAY4_PATH
 /* ------------------------------------------------------------------ */
-/* 4-level grayscale (EPD_GRAY4 builds; kind seeed_reterminal_e1001_gray)
+/* 4-level grayscale (EPD_GRAY4 builds, kind seeed_reterminal_e1001_gray; and
+ * the grey side of EPD_DUAL_DEPTH builds)
  *
  * Either waveform sends BOTH image planes -- DTM1 (0x10, "old") and DTM2
  * (0x13, "new") -- so each pixel carries 2 bits that land on four optical
@@ -1237,7 +1257,79 @@ static void gray_send_solid_rows(uint8_t fill, int rows)
     memset(row, fill, sizeof row);
     for (int y = 0; y < rows; y++) send_data(row, sizeof row);
 }
-#endif /* EPD_GRAY4 */
+
+/* Configure the controller for a 4-gray refresh on a panel that has just been
+ * reset: the built-in OTP waveform or the register LUTs, whichever the glass
+ * has (s_gray_use_otp, from gray_probe_waveform). */
+static void gray_init_panel(void)
+{
+    if (s_gray_use_otp) {
+        /* Built-in OTP 4-gray waveform (bb_epaper epd75_gray_init; TRMNL "a"
+         * profile; Seeed's UC8179_INIT_GRAY_OTP). Newer glass carries the table
+         * already burned in, selected by fixing the temperature-sensor reading
+         * (CCSET TSFIX + TSSET 0x5F). No register LUTs at all -- PSR stays 0x1F
+         * exactly like the proven mono init. Verified on a production E1001
+         * (bench 2026-07-23), so it is left byte-for-byte as it was even where
+         * Seeed's OTP branch differs in ordering. */
+        static const uint8_t CDI_G2[]  = {0x90, 0x07};
+        static const uint8_t BTST_G2[] = {0x27, 0x27, 0x18, 0x17};
+        static const uint8_t CCSET_V[] = {0x02};   /* TSFIX: use TSSET value */
+        static const uint8_t TSSET_V[] = {0x5f};   /* picks the OTP 4-gray LUT */
+
+        cmd_data(PSR,  PSR_V,  sizeof PSR_V);      /* 0x1F: KW, OTP LUTs */
+        cmd_data(CDI,  CDI_G2, sizeof CDI_G2);
+        cmd_data(PON,  NULL, 0);
+        wait_idle();
+        cmd_data(0x06, BTST_G2, sizeof BTST_G2);
+        cmd_data(0xe0, CCSET_V, sizeof CCSET_V);
+        cmd_data(0xe5, TSSET_V, sizeof TSSET_V);
+        cmd_data(TRES, TRES_V,  sizeof TRES_V);    /* proven on this glass */
+        cmd_data(0x15, DSPI_V,  sizeof DSPI_V);
+        ESP_LOGI(TAG, "init complete (4-gray built-in OTP waveform)");
+    } else {
+        /* Register LUTs, for glass with no built-in table. This is Seeed's
+         * EPD_INIT_GRAY register-LUT branch in order.
+         *
+         * The ordering is not incidental. Everything that configures the rails
+         * -- PWR, the PLL, VCOM DC and the booster -- goes down BEFORE power-on,
+         * because that is when the DC-DC converter starts and latches them. The
+         * old sequence set PSR, the PLL, VCOM and CDI after PON, which asked the
+         * converter to come up on one set of values and then changed them under
+         * it.
+         *
+         * 0x60 (TCON) and 0x15 (dual-SPI) are deliberately absent: Seeed sends
+         * neither on this path, and TCON in particular sets source-to-gate
+         * timing that the uploaded waveform assumes the default of. */
+        const int vd = (s_gray_vdcs >= 0) ? s_gray_vdcs : GRAY4_VDCS;
+        const uint8_t cdi_4g[2] = { s_gray_cdi0, 0x07 };
+        const int lut_gain = s_gray_gain;
+
+        cmd_data(PWR,  PWR_4G,  sizeof PWR_4G);
+        cmd_data(0x30, PLL_4G,  sizeof PLL_4G);
+        if (vd >= 0) { const uint8_t v = (uint8_t)vd; cmd_data(0x82, &v, 1); }
+        cmd_data(0x06, BTST_4G, sizeof BTST_4G);   /* booster soft start */
+        cmd_data(PON,  NULL, 0);
+        wait_idle();
+        cmd_data(PSR,  PSR_4G,  sizeof PSR_4G);
+        cmd_data(0xe3, PWS_4G,  sizeof PWS_4G);
+        cmd_data(CDI,  cdi_4g,  sizeof cdi_4g);
+        cmd_data(0x52, LPD_4G,  sizeof LPD_4G);
+        cmd_data(TRES, TRES_V,  sizeof TRES_V);
+
+        gray_send_lut(0x20, LUT_VCOM_4G, lut_gain);
+        gray_send_lut(0x21, LUT_WW_4G,   lut_gain);
+        gray_send_lut(0x22, LUT_BW_4G,   lut_gain);
+        gray_send_lut(0x23, LUT_WB_4G,   lut_gain);
+        gray_send_lut(0x24, LUT_BB_4G,   lut_gain);
+        /* R25 (LUTBD) stays unwritten unless the tuner build asks for it; the
+         * border is set by VBD in the per-frame window preamble instead. */
+        if (s_gray_border_lut == 1)      gray_send_lut(0x25, LUT_WW_4G, lut_gain);
+        else if (s_gray_border_lut == 2) gray_send_lut(0x25, LUT_BB_4G, lut_gain);
+        ESP_LOGI(TAG, "init complete (4-gray register LUTs, gain %d%%)",
+                 lut_gain);
+    }
+}
+#endif /* GRAY4_PATH */
 
 #ifdef EPD_BWR
 /* ------------------------------------------------------------------ */
@@ -1314,71 +1406,7 @@ static void mono_init(void)
     cmd_data(TCON, TCON_V,   sizeof TCON_V);
     ESP_LOGI(TAG, "init complete (BWR OTP waveform; full refresh ~17 s)");
 #elif defined(EPD_GRAY4)
-    if (s_gray_use_otp) {
-        /* Built-in OTP 4-gray waveform (bb_epaper epd75_gray_init; TRMNL "a"
-         * profile; Seeed's UC8179_INIT_GRAY_OTP). Newer glass carries the table
-         * already burned in, selected by fixing the temperature-sensor reading
-         * (CCSET TSFIX + TSSET 0x5F). No register LUTs at all -- PSR stays 0x1F
-         * exactly like the proven mono init. Verified on a production E1001
-         * (bench 2026-07-23), so it is left byte-for-byte as it was even where
-         * Seeed's OTP branch differs in ordering. */
-        static const uint8_t CDI_G2[]  = {0x90, 0x07};
-        static const uint8_t BTST_G2[] = {0x27, 0x27, 0x18, 0x17};
-        static const uint8_t CCSET_V[] = {0x02};   /* TSFIX: use TSSET value */
-        static const uint8_t TSSET_V[] = {0x5f};   /* picks the OTP 4-gray LUT */
-
-        cmd_data(PSR,  PSR_V,  sizeof PSR_V);      /* 0x1F: KW, OTP LUTs */
-        cmd_data(CDI,  CDI_G2, sizeof CDI_G2);
-        cmd_data(PON,  NULL, 0);
-        wait_idle();
-        cmd_data(0x06, BTST_G2, sizeof BTST_G2);
-        cmd_data(0xe0, CCSET_V, sizeof CCSET_V);
-        cmd_data(0xe5, TSSET_V, sizeof TSSET_V);
-        cmd_data(TRES, TRES_V,  sizeof TRES_V);    /* proven on this glass */
-        cmd_data(0x15, DSPI_V,  sizeof DSPI_V);
-        ESP_LOGI(TAG, "init complete (4-gray built-in OTP waveform)");
-    } else {
-        /* Register LUTs, for glass with no built-in table. This is Seeed's
-         * EPD_INIT_GRAY register-LUT branch in order.
-         *
-         * The ordering is not incidental. Everything that configures the rails
-         * -- PWR, the PLL, VCOM DC and the booster -- goes down BEFORE power-on,
-         * because that is when the DC-DC converter starts and latches them. The
-         * old sequence set PSR, the PLL, VCOM and CDI after PON, which asked the
-         * converter to come up on one set of values and then changed them under
-         * it.
-         *
-         * 0x60 (TCON) and 0x15 (dual-SPI) are deliberately absent: Seeed sends
-         * neither on this path, and TCON in particular sets source-to-gate
-         * timing that the uploaded waveform assumes the default of. */
-        const int vd = (s_gray_vdcs >= 0) ? s_gray_vdcs : GRAY4_VDCS;
-        const uint8_t cdi_4g[2] = { s_gray_cdi0, 0x07 };
-        const int lut_gain = s_gray_gain;
-
-        cmd_data(PWR,  PWR_4G,  sizeof PWR_4G);
-        cmd_data(0x30, PLL_4G,  sizeof PLL_4G);
-        if (vd >= 0) { const uint8_t v = (uint8_t)vd; cmd_data(0x82, &v, 1); }
-        cmd_data(0x06, BTST_4G, sizeof BTST_4G);   /* booster soft start */
-        cmd_data(PON,  NULL, 0);
-        wait_idle();
-        cmd_data(PSR,  PSR_4G,  sizeof PSR_4G);
-        cmd_data(0xe3, PWS_4G,  sizeof PWS_4G);
-        cmd_data(CDI,  cdi_4g,  sizeof cdi_4g);
-        cmd_data(0x52, LPD_4G,  sizeof LPD_4G);
-        cmd_data(TRES, TRES_V,  sizeof TRES_V);
-
-        gray_send_lut(0x20, LUT_VCOM_4G, lut_gain);
-        gray_send_lut(0x21, LUT_WW_4G,   lut_gain);
-        gray_send_lut(0x22, LUT_BW_4G,   lut_gain);
-        gray_send_lut(0x23, LUT_WB_4G,   lut_gain);
-        gray_send_lut(0x24, LUT_BB_4G,   lut_gain);
-        /* R25 (LUTBD) stays unwritten unless the tuner build asks for it; the
-         * border is set by VBD in the per-frame window preamble instead. */
-        if (s_gray_border_lut == 1)      gray_send_lut(0x25, LUT_WW_4G, lut_gain);
-        else if (s_gray_border_lut == 2) gray_send_lut(0x25, LUT_BB_4G, lut_gain);
-        ESP_LOGI(TAG, "init complete (4-gray register LUTs, gain %d%%)",
-                 lut_gain);
-    }
+    gray_init_panel();
 #else
     /* FULL unless a caller selected FAST (mono_spi_set_refresh_mode); the
      * FULL bytes live in mono_init_full(), unchanged. */
@@ -1386,21 +1414,23 @@ static void mono_init(void)
 #endif
 }
 
-/* Refresh an already-loaded frame, then power off. */
-static void trigger_refresh(void)
+/* Refresh an already-loaded frame, then power off. gray4 says the frame went
+ * down through the 4-gray path, whose OTP waveform wants DRF's parameter byte. */
+static void refresh_power_off(bool gray4)
 {
-#ifdef EPD_GRAY4
+#if GRAY4_PATH
     /* bb_epaper sends DRF with one 0x00 parameter byte in 4-gray mode, and the
      * OTP path is field-verified that way, so it keeps it. Seeed's register-LUT
      * path sends a bare 0x12; with the panel in partial mode by then, a stray
      * data byte after the refresh opcode is not something to improvise on. */
-    if (s_gray_use_otp) {
+    if (gray4 && s_gray_use_otp) {
         static const uint8_t DRF_V[] = {0x00};
         cmd_data(DRF, DRF_V, sizeof DRF_V);
     } else {
         cmd_data(DRF, NULL, 0);
     }
 #else
+    (void)gray4;
     cmd_data(DRF, NULL, 0);
 #endif
     /* Confirm the refresh actually STARTED before waiting for it to finish.
@@ -1423,6 +1453,12 @@ static void trigger_refresh(void)
     ESP_LOGI(TAG, "refresh done (%lld ms)",
              (long long)((esp_timer_get_time() - t0) / 1000));
 }
+
+#ifdef EPD_GRAY4
+#define trigger_refresh() refresh_power_off(true)
+#else
+#define trigger_refresh() refresh_power_off(false)
+#endif
 
 #if MONO_1BPP
 /* ---------- 1bpp paint path (full / fast), plus the partial shadow ---------- */
@@ -1502,8 +1538,34 @@ static void mono_display(const uint8_t *image)
     trigger_refresh();
 #else
     mono_paint(image, mono_display_mode());
+#if DUAL_DEPTH
+    s_last_paint_gray = false;
+#endif
 #endif
 }
+
+#if DUAL_DEPTH
+/* A 2bpp frame on a board whose native frame is 1bpp (EPD_DUAL_DEPTH). The
+ * glass probe runs once, on the first grey paint, so a unit that only ever
+ * gets mono frames boots and paints exactly as before. The panel is reset into
+ * the 4-gray setup and left uninitialised afterwards, so the next mono paint
+ * re-runs its own init through mono_ensure(). Always a full refresh. A probe
+ * that cannot answer leaves the 1bpp build's fallback in place, register LUTs,
+ * which is also what Seeed falls back to for grey. */
+static void mono_display_gray(const uint8_t *image)
+{
+    mono_glass_probe_once();
+    hw_reset();
+    gray_init_panel();
+    gray_frame_setup();
+    gray_send_plane(0x10, image, 1);
+    gray_send_plane(DTM2, image, 2);
+    refresh_power_off(true);
+    s_panel_mode      = PANEL_UNINIT;
+    s_panel_powered   = false;
+    s_last_paint_gray = true;
+}
+#endif /* DUAL_DEPTH */
 
 #if MONO_1BPP && defined(EPD_MONO_PARTIAL)
 /* ---------- partial refresh (overlay feature; EPD_MONO_PARTIAL builds) ----------
@@ -1765,6 +1827,33 @@ static void mono_show_color_bars(void)
 
     trigger_refresh();
 }
+#elif DUAL_DEPTH && defined(EPD_SELFTEST)
+/* Dual-depth selftest: the 4-gray ramp, black -> dark -> light -> white, top
+ * to bottom, through the same path display_gray takes. The mono path is the
+ * shipped one; the grey one is what a bench pass on new glass has to judge. */
+static void mono_show_color_bars(void)
+{
+    const int BAND_H = EPD_HEIGHT / 4;
+
+    mono_glass_probe_once();
+    hw_reset();
+    gray_init_panel();
+    gray_frame_setup();
+    gpio_set_level(EPD_PIN_CS, 0);
+    send_cmd(0x10);
+    for (int g = 0; g < 4; g++)
+        gray_send_solid_rows(GRAY_P1_BIT(g) ? 0xFF : 0x00, BAND_H);
+    gpio_set_level(EPD_PIN_CS, 1);
+    gpio_set_level(EPD_PIN_CS, 0);
+    send_cmd(DTM2);
+    for (int g = 0; g < 4; g++)
+        gray_send_solid_rows(GRAY_P2_BIT(g) ? 0xFF : 0x00, BAND_H);
+    gpio_set_level(EPD_PIN_CS, 1);
+    refresh_power_off(true);
+    s_panel_mode      = PANEL_UNINIT;
+    s_panel_powered   = false;
+    s_last_paint_gray = true;
+}
 #else
 /* Diagnostic: 8 alternating black/white horizontal bands. On a healthy panel
  * this shows crisp stripes; smearing or a blank screen points at the init or
@@ -1825,6 +1914,12 @@ static void mono_show_palette_sweep(void)
 
 static void mono_sleep(void)
 {
+#if DUAL_DEPTH
+    if (s_last_paint_gray) {
+        static const uint8_t CDI_FLOAT_G[] = {0xf7};
+        cmd_data(CDI, CDI_FLOAT_G, sizeof CDI_FLOAT_G);
+    }
+#endif
 #if defined(EPD_BWR) || defined(EPD_GRAY4)
     /* Float the border before sleeping (GD/GxEPD2 deep-sleep sequence).
      *
@@ -1885,6 +1980,9 @@ const epd_driver_t mono_spi_driver = {
     .init               = mono_init,
     .clear              = mono_clear,
     .display            = mono_display,
+#if DUAL_DEPTH
+    .display_gray       = mono_display_gray,
+#endif
     .show_color_bars    = mono_show_color_bars,
     .show_palette_sweep = mono_show_palette_sweep,
     .sleep              = mono_sleep,

@@ -21,6 +21,7 @@
 #include "touch3_run.h"   /* BOARD_TOUCH3 */
 #include "wake_align.h"   /* drift EWMA fed from every Date-header discipline */
 #include "wifi_manager.h"
+#include "epd_driver.h"     /* epd_supports_gray: the "gamuts" capability */
 #if BOARD_TOUCH3
 #include "touch3.h"           /* T3_TOUCH_V, T3_MAX_PRIMS */
 #include "panel/epd_panel.h"  /* epd_active_driver()->info.bpp */
@@ -617,6 +618,20 @@ static void add_power_capability(cJSON *o)
     cJSON_AddBoolToObject(o, "can_stay_awake", power_can_stay_awake());
 }
 
+/* Frame depths this firmware can paint, for boards that take either a mono or
+ * a 4-level grey frame (EPD_DUAL_DEPTH). The server chooses per device and
+ * must only send grey when this lists it, so the key is what lets one
+ * firmware serve both settings and lets an older build on the same kind keep
+ * getting mono. Omitted on every other board, whose kind fixes the depth. */
+static void add_gamut_capability(cJSON *o)
+{
+    if (!epd_supports_gray()) return;
+    cJSON *g = cJSON_AddArrayToObject(o, "gamuts");
+    if (!g) return;
+    cJSON_AddItemToArray(g, cJSON_CreateString("mono"));
+    cJSON_AddItemToArray(g, cJSON_CreateString("gray_4"));
+}
+
 static char *identity_body(uint16_t panel_w, uint16_t panel_h,
                            const char *mac, const char *fw_version,
                            bool advertise_ota)
@@ -642,6 +657,7 @@ static char *identity_body(uint16_t panel_w, uint16_t panel_h,
 #endif
     /* Register advertises capabilities; discover stays identity-only. */
     if (advertise_ota) add_power_capability(o);
+    if (advertise_ota) add_gamut_capability(o);
     if (advertise_ota) add_deck_capability(o);
     if (advertise_ota) add_frame_cache_capability(o);
 #if BOARD_OVERLAY_PARTIAL
@@ -1178,6 +1194,7 @@ rest_status_t rest_post_status(int rssi, const char *ip,
     /* Every beat, on every board: the answer can change without a reboot when
      * a mains panel is unplugged or its cell runs down. */
     add_power_capability(o);
+    add_gamut_capability(o);
     add_deck_capability(o);
     add_frame_cache_capability(o);
 #if BOARD_OVERLAY_PARTIAL

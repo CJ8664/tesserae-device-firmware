@@ -197,6 +197,7 @@ static int effective_sleep_s(void)
  * because the always-on loop holds one by value across iterations. */
 typedef struct {
     uint8_t          *frame;   /* malloc'd; owned by whoever holds this */
+    size_t            frame_len;   /* its length: picks mono or grey to paint */
     rest_frame_out_t  fo;
 } pending_frame_t;
 
@@ -963,7 +964,7 @@ static bool frame_fetch(const char *server_url, const char *held_etag,
     resolve_url(server_url, out->fo.url, fullurl, sizeof fullurl);
     fetched_image_t img;
     if (image_fetch(fullurl, &img) != ESP_OK) return false;
-    if (image_decode_to_frame(&img, fullurl, &out->frame) != ESP_OK)
+    if (image_decode_to_frame(&img, fullurl, &out->frame, &out->frame_len) != ESP_OK)
         out->frame = NULL;
     free(img.data);
     if (!out->frame) return false;
@@ -985,7 +986,7 @@ static void frame_paint(pending_frame_t *p)
     /* v3 draws its controls INTO the frame the server left blank there, so one
      * refresh shows image + controls together (touch-v3 firmware-spec §4). */
     touch3_compose(p->frame);
-    epd_display(p->frame);
+    epd_display_frame(p->frame, p->frame_len);
     epd_sleep();
     /* The etag is stored HERE rather than at fetch time, which is what makes a
      * deferred frame safe: a frame that was fetched and then superseded before
@@ -1346,12 +1347,12 @@ static bool relay_poll_and_paint(void)
 
     switch (relay_fetch_frame(&plain, &plain_len, &owned)) {
     case RELAY_FRAME_NEW:
-        if (plain_len == (size_t)EPD_BUF_BYTES) {
+        if (epd_frame_bytes_ok(plain_len)) {
             ESP_LOGI(TAG, "relay frame %u bytes; painting (~30 s)...",
                      (unsigned)plain_len);
             ESP_ERROR_CHECK(epd_port_init());
             epd_init();
-            epd_display(plain);
+            epd_display_frame(plain, plain_len);
             epd_sleep();
             rest_config_set_ui_state(UI_CONNECTED);
             relay_commit_frame();   /* only now is the ETag truthful */
@@ -2589,6 +2590,7 @@ void app_main(void)
     bool skip_paint     = false;
     bool just_onboarded = false;
     uint8_t *frame  = NULL;
+    size_t   frame_len = 0;
 #ifdef TESSERAE_STREAM_FRAMES
     bool streamed   = false;   /* frame already on the glass (stream_fetch_and_paint) */
 #endif
@@ -2848,7 +2850,7 @@ void app_main(void)
 #else
         fetched_image_t img;
         if (image_fetch(fullurl, &img) == ESP_OK) {
-            if (image_decode_to_frame(&img, fullurl, &frame) != ESP_OK) frame = NULL;
+            if (image_decode_to_frame(&img, fullurl, &frame, &frame_len) != ESP_OK) frame = NULL;
             free(img.data);
             /* Radio is up and the new frame's digest is known: fetch the
              * overlay spec + atlases for it (404 = dormant, no-op). */
@@ -3126,7 +3128,7 @@ void app_main(void)
             int64_t t0 = esp_timer_get_time();
             uint32_t ls0 = epd_light_sleep_count();
             uint32_t pf0 = diag_run_paint_failures();
-            epd_display(frame);
+            epd_display_frame(frame, frame_len);
             epd_sleep();
             paint_failed = diag_run_paint_failures() != pf0;
             ESP_LOGI(TAG, "paint done in %lld ms (%lu light-sleep naps)%s",

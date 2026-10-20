@@ -69,6 +69,13 @@ typedef struct epd_driver {
     void (*clear)(uint8_t color);
     /* Push a full-frame buffer (info.buf_bytes long, panel-native layout). */
     void (*display)(const uint8_t *image);
+    /* OPTIONAL (NULL = mono only): push a 4-level grey frame on a panel whose
+     * native frame is 1bpp. `image` is EPD_GRAY_BUF_BYTES long, 2bpp packed,
+     * 4 px/byte MSB-first, 0b00 = black .. 0b11 = white. Boards that set
+     * EPD_DUAL_DEPTH provide it; the frame's length picks which entry point
+     * paints it (epd_display_frame), so one firmware takes whichever depth the
+     * server chose for the device. */
+    void (*display_gray)(const uint8_t *image);
     /* Diagnostic: paint the palette as horizontal color bands. */
     void (*show_color_bars)(void);
     /* Diagnostic: paint every raw nibble value as a band. */

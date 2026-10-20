@@ -51,6 +51,20 @@
 #define EPD_HEIGHT     480
 #define EPD_BUF_BYTES  ((EPD_WIDTH * EPD_HEIGHT) / 8)   /* 1bpp packed = 48000 */
 
+/* Dual depth: this firmware also paints 4-level grey frames, 2bpp packed, 4
+ * px/byte MSB-first, 0b00 = black .. 0b11 = white, 96000 bytes. The frame's
+ * length picks the path, and the server sends grey only to devices that
+ * advertise it ("gamuts" on register and status) and are set to grey, so a
+ * mono frame paints exactly as before. The grey path is unverified on this
+ * glass; the -selftest env paints the grey ramp.
+ * No PSRAM here: a grey frame needs twice the mono buffer of internal RAM,
+ * which has not been checked next to WiFi and TLS. A frame that does not
+ * fit fails to download and the panel keeps its image; set the device back
+ * to mono on the server.
+ */
+#define EPD_DUAL_DEPTH      1
+#define EPD_GRAY_BUF_BYTES  ((EPD_WIDTH * EPD_HEIGHT) / 4)   /* 2bpp = 96000 */
+
 /* Mono palette (bit 1 = white, bit 0 = black), matching mono_spi / the E1001. */
 #define EPD_COL_BLACK   0x0
 #define EPD_COL_WHITE   0x1

@@ -1,5 +1,6 @@
 #include "image_decoder.h"
 #include "app_config.h"
+#include "epd_driver.h"
 
 #include <string.h>
 
@@ -14,13 +15,15 @@ static const char *TAG = "decode";
  * panel costs ~30 s of refresh power for a useless render. Hard-fail. */
 esp_err_t image_decode_to_frame(fetched_image_t *src,
                                 const char *url,
-                                uint8_t **out_frame)
+                                uint8_t **out_frame,
+                                size_t *out_len)
 {
     (void)url;
     if (!src || !out_frame) return ESP_ERR_INVALID_ARG;
     *out_frame = NULL;
+    if (out_len) *out_len = 0;
 
-    if (src->len != EPD_BUF_BYTES) {
+    if (!epd_frame_bytes_ok(src->len)) {
         ESP_LOGE(TAG,
             "frame size mismatch: got %u bytes, expected %u "
             "(content-type='%s'); refusing to paint",
@@ -37,6 +40,7 @@ esp_err_t image_decode_to_frame(fetched_image_t *src,
      * one exit with no log line -- the frame downloaded, decoded, then
      * silently never painted. */
     *out_frame = src->data;
+    if (out_len) *out_len = src->len;
     src->data = NULL;
     src->len = 0;
     return ESP_OK;
