@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.49.0] - 2026-10-20
+
 ### Added
 
 - Elecrow CrowPanel ESP32 5.79" (`elecrow-crowpanel-579`): the 792x272
@@ -15,9 +17,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   buffer of the `elecrow_crowpanel_579` kind. The rotary switch moves through
   the rotation and its press re-renders, the microSD slot is on its own bus,
   and the board has no battery sense. The module's 8 MB flash takes a new A/B
-  table (`partitions_8m_ota.csv`, `sdkconfig.8m.defaults`). The selftest and
-  the setup splash are checked on hardware; a served dashboard, the buttons,
-  deep-sleep wake and the SD slot are not yet.
+  table (`partitions_8m_ota.csv`, `sdkconfig.8m.defaults`). Runs on hardware;
+  the microSD slot is not yet checked.
 
 ## [1.48.0] - 2026-10-15
 
