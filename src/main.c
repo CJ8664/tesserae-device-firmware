@@ -98,6 +98,28 @@ RTC_NOINIT_ATTR static uint32_t s_reset_taps;
  * gives up and reopens the portal, instead of dropping to AP on the first miss. */
 RTC_NOINIT_ATTR static uint32_t s_wifi_fail_count;
 
+/* Outage state after an onboarded device's setup portal expired unused
+ * (dmellok/tesserae#270). Non-zero = the portal was already offered for
+ * this outage, holding wifi_creds_fingerprint() of the credentials it was
+ * offered for, so a credential change (portal, BLE, serial setup) drops it.
+ * While set, a failed connect sleeps WIFI_OUTAGE_RETRY_SLEEP_S instead of
+ * reopening the portal. Cleared on a successful connect, when a portal
+ * opens, and by a power-on / RESET, which reopens setup on the next miss.
+ * s_outage_retries counts those timed retries for the backoff. */
+RTC_NOINIT_ATTR static uint32_t s_outage_portal_fp;
+RTC_NOINIT_ATTR static uint32_t s_outage_retries;
+
+/* Set at boot when a power-on / RESET (or, later, a button wake) arrived
+ * while s_outage_portal_fp was set: the user is at the panel, so a failed
+ * connect this boot opens setup straight away. */
+static bool s_outage_user_reopen;
+
+static void outage_clear(void)
+{
+    s_outage_portal_fp = 0;
+    s_outage_retries = 0;
+}
+
 /* Monotonic id bumped on every button wake (RTC-retained) so the server can
  * dedup a retried request to one action; survives deep sleep, distinct per press. */
 RTC_NOINIT_ATTR static uint64_t s_button_event_seq;
@@ -123,6 +145,7 @@ static bool detect_settings_mode(esp_reset_reason_t reason)
         s_rtc_magic = RTC_TAP_MAGIC;
         s_reset_taps = 0;
         s_wifi_fail_count = 0;
+        outage_clear();
         /* Random seed, NOT zero: the server dedups on event_id ACROSS
          * reboots (device_facts persistence), so restarting the sequence at
          * 1 after a power-on/reflash replays already-consumed ids and every
@@ -138,6 +161,13 @@ static bool detect_settings_mode(esp_reset_reason_t reason)
     }
 
     bool manual = (reason == ESP_RST_POWERON || reason == ESP_RST_EXT);
+    if (manual && s_outage_portal_fp) {
+        /* A person pressed RESET / re-powered the panel during an outage
+         * whose portal already expired: end the quiet retry mode so a miss
+         * on this boot opens setup again (#270). */
+        s_outage_user_reopen = true;
+        outage_clear();
+    }
     if (manual) {
         s_reset_taps++;
     } else {
@@ -737,9 +767,35 @@ static ble_setup_mode_t setup_ble_mode(void)
     return BLE_SETUP_MODE_NEW_DEVICE;
 }
 
+/* Painted once when an onboarded device gives up on the setup portal for
+ * this outage, replacing the portal splash (whose SoftAP is about to go
+ * away). The cached ETags are dropped and persisted so the first frame
+ * after the network returns repaints instead of 304ing onto this screen. */
+static void show_wifi_unavailable_screen(void)
+{
+    char body[160];
+    snprintf(body, sizeof body,
+             "Retrying every %d minutes. "
+#if defined(BOARD_HAS_BUTTONS)
+             "Press a button or restart the panel to open Wi-Fi setup.",
+#else
+             "Restart the panel to open Wi-Fi setup.",
+#endif
+             WIFI_OUTAGE_RETRY_SLEEP_S / 60);
+    splash_show_message("Wi-Fi unavailable", body);
+    rest_config_set_frame_etag("");
+    rest_config_set_relay_etag("");
+    esp_err_t err = rest_config_save();
+    if (err != ESP_OK)
+        ESP_LOGW(TAG, "could not persist the cleared ETags: %s", esp_err_to_name(err));
+}
+
 static void run_provisioning_then_reboot(const char *note)
 {
     const char *portal_note = note;
+    /* The portal is being offered now; outage mode starts again only if it
+     * expires unused (below). */
+    outage_clear();
     while (1) {
         ESP_LOGW(TAG, "opening captive portal%s%s",
                  portal_note ? ": " : "", portal_note ? portal_note : "");
@@ -770,19 +826,26 @@ static void run_provisioning_then_reboot(const char *note)
 
     /* Portal expired with no client ever joining (or no submission). An
      * onboarded device most likely got here through an outage (network
-     * switched off overnight, router down for hours), not bad credentials:
-     * sleep on a timer and retry the stored network, and on another miss the
-     * portal reopens, so a user standing at the panel still gets the setup
-     * screen within one cycle (dmellok/tesserae#270). Only a
-     * never-onboarded device powers
-     * down completely and requires a manual RESET, since there the stored
-     * configuration itself is the likely problem. The board's RESET button
-     * (chip EN line) causes a fresh boot which re-enters the portal. */
+     * switched off overnight, router down for hours), not bad credentials.
+     * Offer the portal once per outage, not on every retry: reopening it
+     * each wake kept the SoftAP up for 15 of every 45 minutes and repainted
+     * the panel each time, the likely cause of a PhotoPainter losing 7 % of
+     * its battery in five hours (dmellok/tesserae#270). Paint a "Wi-Fi unavailable" screen
+     * once, remember the outage in RTC memory, and retry the stored network
+     * on a timer with the radio off in between; a successful connect ends
+     * it, a power-on / RESET or a button press reopens setup. Only a
+     * never-onboarded device powers down completely and requires a manual
+     * RESET, since there the stored configuration itself is the likely
+     * problem. The board's RESET button (chip EN line) causes a fresh boot
+     * which re-enters the portal. */
     if (wifi_creds_present() &&
         (rest_config_get()->device_token[0] != '\0' || relay_ready())) {
-        ESP_LOGW(TAG, "captive portal expired idle; retrying stored Wi-Fi in %d min",
-                 WIFI_PORTAL_RETRY_SLEEP_S / 60);
-        s_sleep_override_s = WIFI_PORTAL_RETRY_SLEEP_S;
+        ESP_LOGW(TAG, "captive portal expired idle; not reopening it this outage, "
+                      "retrying stored Wi-Fi every %d min", WIFI_OUTAGE_RETRY_SLEEP_S / 60);
+        s_outage_portal_fp = wifi_creds_fingerprint();
+        s_outage_retries = 0;
+        show_wifi_unavailable_screen();
+        s_sleep_override_s = WIFI_OUTAGE_RETRY_SLEEP_S;
         sleep_forever_or_until_timer();
         /* not reached */
     }
@@ -1289,6 +1352,9 @@ static bool maybe_factory_reset_hold(button_id_t woke_btn, bool first_boot)
 
 static bool apply_ble_result(ble_setup_result_t result)
 {
+    if (result == BLE_SETUP_RESULT_CONFIGURED || result == BLE_SETUP_RESULT_REBOOT ||
+        result == BLE_SETUP_RESULT_CLEAR_WIFI || result == BLE_SETUP_RESULT_FACTORY_RESET)
+        outage_clear();   /* setup was used: a later outage starts over */
     switch (result) {
     case BLE_SETUP_RESULT_CONFIGURED:
     case BLE_SETUP_RESULT_REBOOT:
@@ -2522,16 +2588,39 @@ void app_main(void)
          * credentials. Don't drop a working device into AP mode on the first
          * miss (that strands it off-network and burns the battery on an
          * always-on radio). Retry over a few short-sleep wakes; only after
-         * WIFI_FAIL_AP_THRESHOLD consecutive misses reopen the portal. The
-         * count clears ONLY on a successful connect, never here: once past
-         * the threshold, each portal-retry-sleep wake (see
-         * run_provisioning_then_reboot) makes one attempt and drops straight
-         * back to the portal rather than re-running the whole ladder. A
-         * never-onboarded device goes straight to the portal, since there
-         * the creds themselves are the likely problem. */
+         * WIFI_FAIL_AP_THRESHOLD consecutive misses open the portal. If that
+         * portal then expires unused, the outage state below takes over:
+         * timed retries with no portal until the network returns or someone
+         * asks for setup (dmellok/tesserae#270). The count clears ONLY on a
+         * successful connect, never here. A never-onboarded device goes
+         * straight to the portal, since there the creds themselves are the
+         * likely problem. */
         bool onboarded = rest_config_get()->device_token[0] != '\0' ||
                          relay_ready();
-        if (onboarded && ++s_wifi_fail_count < WIFI_FAIL_AP_THRESHOLD) {
+        if (s_outage_portal_fp && s_outage_portal_fp != wifi_creds_fingerprint()) {
+            ESP_LOGI(TAG, "Wi-Fi credentials changed since the portal expired; "
+                          "leaving outage retry mode");
+            outage_clear();
+        }
+        if (s_outage_portal_fp && woke_by_button) {
+            ESP_LOGI(TAG, "button press during a Wi-Fi outage: opening setup");
+            s_outage_user_reopen = true;
+            outage_clear();
+        }
+        if (onboarded && s_outage_portal_fp && !s_outage_user_reopen) {
+            s_outage_retries++;
+            int retry_s = s_outage_retries >= WIFI_OUTAGE_BACKOFF_AFTER
+                              ? WIFI_OUTAGE_RETRY_SLOW_S : WIFI_OUTAGE_RETRY_SLEEP_S;
+            ESP_LOGW(TAG, "STA connect failed (%s); setup portal already offered this "
+                     "outage, retry %lu in %d min (radio off)", esp_err_to_name(err),
+                     (unsigned long)s_outage_retries, retry_s / 60);
+            wifi_sta_stop();
+            s_sleep_override_s = retry_s;
+            sleep_forever_or_until_timer();
+            return;
+        }
+        if (onboarded && !s_outage_user_reopen &&
+            ++s_wifi_fail_count < WIFI_FAIL_AP_THRESHOLD) {
             ESP_LOGW(TAG, "STA connect failed (%s); onboarded, retry %lu/%d in %ds "
                      "(not opening AP)", esp_err_to_name(err),
                      (unsigned long)s_wifi_fail_count, WIFI_FAIL_AP_THRESHOLD,
@@ -2545,11 +2634,13 @@ void app_main(void)
         }
         ESP_LOGE(TAG, "STA connect failed (%s)%s; opening portal",
                  esp_err_to_name(err),
-                 onboarded ? " after repeated retries" : " (not onboarded)");
+                 s_outage_user_reopen ? " (setup requested during an outage)"
+                 : onboarded ? " after repeated retries" : " (not onboarded)");
         run_provisioning_then_reboot("Wi-Fi didn't connect");
         return;
     }
     s_wifi_fail_count = 0;   /* connected -> clear the retry streak */
+    outage_clear();          /* and end any outage retry mode (#270) */
 #if TESSERAE_OTA_CAPABILITY_ENABLED
     /* Confirm a first-boot image only after the agreed local checks, including
      * WiFi association, pass. Tesserae server reachability is intentionally not

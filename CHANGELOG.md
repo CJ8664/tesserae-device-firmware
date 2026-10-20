@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- A set-up panel waiting out a Wi-Fi outage no longer reopens the setup
+  portal on every retry (dmellok/tesserae#270). The portal still opens once
+  after the existing ~12 minutes of retries; if it expires unused, the panel
+  paints a "Wi-Fi unavailable" screen once and then retries the stored
+  network every 12 minutes (30 minutes after about two hours) in deep sleep,
+  with no SoftAP and no repaint per retry. Before, each 30-minute sleep was
+  followed by another 15-minute portal and a portal splash repaint. Setup
+  reopens on a power-on or RESET, a front-button press on boards with
+  buttons, or once the stored Wi-Fi credentials change; holding Refresh still
+  enters Bluetooth maintenance. A panel that was never set up, and a wrong
+  password entered in setup, behave as before. The "Wi-Fi unavailable"
+  screen clears the cached frame ETag, so the dashboard repaints when the
+  network returns instead of a 304 leaving the setup screen up.
+
 ### Fixed
 
 - microSD cards that refuse CMD59 (SPI data CRC on) or time out reading the

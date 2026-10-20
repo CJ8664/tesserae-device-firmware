@@ -206,6 +206,15 @@ never a black box:
 - **Reached the server, waiting for admin approval** — this is *not* a failure:
   the panel shows *"Almost done — approve this device in Tesserae"* and the
   device sleeps and retries (it does **not** reopen the portal).
+- **Wi-Fi drops on a set-up panel** (router off overnight, out of range) —
+  the panel retries every minute for about 12 minutes, then opens the setup
+  portal once (15 minutes). If nobody uses it, the panel shows *"Wi-Fi
+  unavailable"* and from then on retries the stored network every 12 minutes
+  (every 30 after about two hours) with the radio off in between, and does
+  not reopen the portal for that outage. It rejoins on its own when the
+  network is back. To get the setup portal again, restart the panel (power
+  or RESET), or press a front button on boards that have one; holding
+  Refresh still opens Bluetooth setup.
 - **Onboarded, no frame yet** — paints *"Connected! Waiting for your first
   frame"* so setup has clear closure; the frame lands on a later wake.
 

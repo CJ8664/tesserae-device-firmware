@@ -153,22 +153,27 @@
 /* Max idle window the captive portal stays up with no client associated
  * to the SoftAP. The timer resets each time a STA joins the AP, so a user
  * actively filling in the form never times out. After this many seconds
- * with no client connected: an onboarded device sleeps for
- * WIFI_PORTAL_RETRY_SLEEP_S and then retries the stored network (a
- * scheduled outage -- network switched off overnight -- must not strand
- * the panel; see dmellok/tesserae#270); a never-onboarded device
- * deep-sleeps with no
- * wakeup source configured -- only a RESET / EXT button press boots it
- * again, since there the stored configuration itself is the likely
- * problem. */
+ * with no client connected: an onboarded device paints a "Wi-Fi
+ * unavailable" screen once and from then on retries the stored network on
+ * a timer with the radio off in between (WIFI_OUTAGE_RETRY_SLEEP_S below; a
+ * scheduled outage -- network switched off overnight -- must not strand the
+ * panel or drain it, see dmellok/tesserae#270); a never-onboarded device
+ * deep-sleeps with no wakeup source configured -- only a RESET / EXT button
+ * press boots it again, since there the stored configuration itself is the
+ * likely problem. */
 #define PROVISION_PORTAL_TIMEOUT_S  (15 * 60)
 
-/* How long an onboarded device sleeps after an idle portal expiry before
- * waking to retry the stored network. Another miss reopens the portal, so
- * someone standing at the panel still gets the setup screen within one
- * cycle, while a panel nobody touches rejoins on its own once the network
- * is back. */
-#define WIFI_PORTAL_RETRY_SLEEP_S   (30 * 60)
+/* After an onboarded device's portal expires unused, the portal is NOT
+ * offered again for the same outage: each wake makes one attempt on the
+ * stored network and goes back to deep sleep for this long. Setup reopens
+ * only on an explicit user action -- a power-on / RESET, or a front-button
+ * press on boards that have one (holding Refresh still enters BLE
+ * maintenance as before) -- or when the stored credentials change. A
+ * successful connect ends the outage. After WIFI_OUTAGE_BACKOFF_AFTER
+ * retries (~2 h) the interval stretches to WIFI_OUTAGE_RETRY_SLOW_S. */
+#define WIFI_OUTAGE_RETRY_SLEEP_S   (12 * 60)
+#define WIFI_OUTAGE_BACKOFF_AFTER   10
+#define WIFI_OUTAGE_RETRY_SLOW_S    (30 * 60)
 
 /* SoftAP credentials shown to the user during provisioning. */
 #define PROVISION_AP_SSID    "Tesserae-Setup"
