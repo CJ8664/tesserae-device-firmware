@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.50.0] - 2026-10-20
+
 ### Added
 
 - Dual-depth firmware for six mono panels: the Elecrow CrowPanel 5.79", the
@@ -34,8 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - X4: `ssd1677_gray` paints a grey frame through its 4-gray path while the
     build stays mono in every other respect. Grey frame 96000 bytes, the
     bytes CrossInk paints for `xteink_x4_gray`.
-  - Each board's `-selftest` env shows the grey ramp. None of the grey paths
-    is checked on hardware yet, and on the C3 and classic-ESP32 boards
+  - Each board's `-selftest` env shows the grey ramp. Only the CrowPanel's
+    grey path is checked on hardware so far, and on the C3 and classic-ESP32 boards
     (no PSRAM) a grey frame needs twice the mono buffer of internal RAM,
     which is also unchecked. Relay-paired panels keep mono: the pairing
     report carries one gamut.
