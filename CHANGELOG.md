@@ -22,9 +22,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `epd_frame_bytes_ok()` / `epd_display_frame()` so the server, relay, deck
     and Album paths accept either length and route by it.
   - CrowPanel: `ssd1683_dual` uploads a 4-gray waveform for a grey frame and
-    writes both RAM planes. The waveform, rails and plane encoding are Good
-    Display's set for their SSD1683 4.2" glass, so this panel may need LUT
-    tuning. Grey frame 53856 bytes.
+    writes both RAM planes. The waveform, gate and source rails and plane
+    encoding are Good Display's set for their SSD1683 4.2" glass; on this
+    panel VCOM stays the panel's own and the end option is the normal 0x22,
+    since the set's 0x07 let the image go soft a second after each refresh.
+    Checked on hardware: the selftest ramp and a live grey dashboard. Grey
+    frame 53856 bytes.
   - The four UC8179 7.5" boards: `mono_spi` compiles the E1001's 4-gray path
     beside its 1bpp one, probing the glass for its waveform on the first grey
     paint only. Grey frame 96000 bytes.

@@ -41,8 +41,9 @@
  * px/byte MSB-first, 0b00 = black .. 0b11 = white, 53856 bytes. The frame's
  * length picks the path, and the server sends grey only to devices that
  * advertise it ("gamuts" on register and status) and are set to grey, so a
- * mono frame paints exactly as before. The grey path is unverified on this
- * glass; the -selftest env paints the grey ramp.
+ * mono frame paints exactly as before. The grey path is checked on this glass
+ * (bench 2026-10-20: selftest ramp and a live dashboard); the -selftest env
+ * paints the grey ramp.
  */
 #define EPD_DUAL_DEPTH      1
 #define EPD_GRAY_BUF_BYTES  ((EPD_WIDTH * EPD_HEIGHT) / 4)   /* 2bpp = 53856 */

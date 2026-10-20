@@ -89,8 +89,9 @@ static const uint8_t UPD_CTRL1_FULL[] = {0x40, 0x10};
  * (ThinkInk_420_Grayscale4_MFGN.h): 227 LUT bytes to 0x32, then the
  * end-option, gate, source and VCOM bytes that follow them in Good Display's
  * 233-byte tables. The CrowPanel's GDEY0579T93 is the same vendor and
- * controller but not the same glass, so these are the starting point for a
- * bench pass rather than a measured result.
+ * controller but not the same glass; benched on it 2026-10-20, it holds four
+ * clean levels with the waveform as published, the panel's own VCOM and the
+ * normal end option (see SSD1683_GRAY_SET_VCOM and SSD1683_GRAY_EOPT).
  *
  * Plane bits for the frame's level g (0 = black .. 3 = white), from Adafruit's
  * layer table (white 00, light 01, dark 10, black 11 with both buffers
@@ -124,10 +125,35 @@ static const uint8_t LUT_4G[227] = {
     0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
 };
-static const uint8_t END_OPT_4G[] = {0x07};
+/* End option (0x3F). The published set sends 0x07, which keeps the sources at
+ * their last level once the waveform ends; on this glass the image then went
+ * soft a second or two after every refresh as that charge bled away (bench,
+ * 2026-10-20). 0x22, the normal end with the sources back to ground, holds it. */
+#ifndef SSD1683_GRAY_EOPT
+#define SSD1683_GRAY_EOPT 0x22
+#endif
+static const uint8_t END_OPT_4G[] = {SSD1683_GRAY_EOPT};
 static const uint8_t GATE_V_4G[]  = {0x17};
 static const uint8_t SRC_V_4G[]   = {0x41, 0xA8, 0x32};
 static const uint8_t VCOM_4G[]    = {0x30};
+
+/* Which of the 4.2" set's rails to impose on this glass: 1 writes the value
+ * above, 0 leaves the panel's own (OTP) value. Bench, 2026-10-20: the gate and
+ * source rails are needed (without them the greys came out worse), VCOM is
+ * not, so it stays the panel's.
+ *
+ * Also learned on that bench, so nobody retries it: the LUT is five per-level
+ * waveforms (four pixel states, then VCOM) of six 7-byte phase groups, and
+ * group 3, a short closing pass, is what clears the previous image. Dropping
+ * or shortening it sharpened edges only at the price of ghosting, and a mono
+ * pre-paint to clear instead cost a second flash; the softness was the end
+ * option above all along. */
+#ifndef SSD1683_GRAY_SET_VCOM
+#define SSD1683_GRAY_SET_VCOM   0
+#endif
+#ifndef SSD1683_GRAY_SET_RAILS
+#define SSD1683_GRAY_SET_RAILS  1   /* gate 0x03 + source 0x04 */
+#endif
 static const uint8_t BOOST_4G[]   = {0x8B, 0x9C, 0xA4, 0x0F};
 static const uint8_t BORDER_4G[]  = {0x03};
 
@@ -341,9 +367,13 @@ static void paint_gray(const uint8_t *image, uint8_t fill1, uint8_t fill2,
     cmd_data(SSD_BOOST,    BOOST_4G,   sizeof BOOST_4G);
     cmd_data(SSD_LUT,      LUT_4G,     sizeof LUT_4G);
     cmd_data(SSD_END_OPT,  END_OPT_4G, sizeof END_OPT_4G);
+#if SSD1683_GRAY_SET_RAILS
     cmd_data(SSD_GATE_V,   GATE_V_4G,  sizeof GATE_V_4G);
     cmd_data(SSD_SOURCE_V, SRC_V_4G,   sizeof SRC_V_4G);
+#endif
+#if SSD1683_GRAY_SET_VCOM
     cmd_data(SSD_VCOM,     VCOM_4G,    sizeof VCOM_4G);
+#endif
 
     send_plane(image, fill1, false, 1);
     send_plane(image, fill1, true, 1);
