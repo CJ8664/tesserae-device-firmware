@@ -462,29 +462,26 @@ static void ssd1683_clear(uint8_t color)
  *                                       directions in set_window are wrong
  *   a break or doubled column at mid-width -> the seam is off */
 #if defined(EPD_DUAL_DEPTH) && defined(EPD_SELFTEST)
-/* Bring-up, gray: four bands black, dark gray, light gray, white from the top,
- * a white wedge in the black band's top-left corner, and 1px black/white
- * stripes in the white band's left half. Even steps between the two greys are
- * the tuning target; the wedge and seam checks are the mono ones. */
+/* Bring-up, gray: four full-height columns, black, dark gray, light gray and
+ * white from the left, with a white wedge in the black column's top-left
+ * corner. Even steps between the two greys are the tuning target; the wedge
+ * gives orientation. Bit order and the seam are the mono selftest's job. */
 static void ssd1683_show_color_bars(void)
 {
     uint8_t *frame = malloc(EPD_GRAY_BUF_BYTES);
     if (!frame) return;
-    const int BAND_H = EPD_HEIGHT / 4;
     const int stride = EPD_WIDTH / 4;
-    static const uint8_t LEVEL_BYTE[4] = {0x00, 0x55, 0xAA, 0xFF};
+    const int WEDGE = 48;   /* px */
 
     for (int fy = 0; fy < EPD_HEIGHT; fy++) {
-        int band = fy / BAND_H;
-        if (band > 3) band = 3;
-        memset(frame + (size_t)fy * stride, LEVEL_BYTE[band], stride);
+        uint8_t *row = frame + (size_t)fy * stride;
+        for (int fx = 0; fx < EPD_WIDTH; fx++) {
+            uint8_t g = (uint8_t)(fx * 4 / EPD_WIDTH);           /* 0..3 */
+            if (fx < WEDGE && fy < WEDGE) g = 3;                  /* wedge */
+            const int sh = (3 - (fx & 3)) * 2;
+            row[fx >> 2] = (uint8_t)((row[fx >> 2] & ~(0x3 << sh)) | (g << sh));
+        }
     }
-    for (int fy = 3 * BAND_H; fy < EPD_HEIGHT; fy++)
-        memset(frame + (size_t)fy * stride, 0x33, stride / 2);   /* black, white, ... */
-
-    const int WEDGE = 48;   /* px, a multiple of 4 */
-    for (int fy = 0; fy < WEDGE; fy++)
-        memset(frame + (size_t)fy * stride, 0xff, WEDGE / 4);
 
     ssd1683_display_gray(frame);
     free(frame);
