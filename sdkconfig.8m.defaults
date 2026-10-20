@@ -1,0 +1,9 @@
+# 8 MB flash overlay for S3 R8 boards (Elecrow CrowPanel 5.79", WROOM-1-N8R8).
+# Layered after sdkconfig.ota.defaults, so both the flash size and the table
+# it names win over the 16 MB defaults.
+
+# --- Flash / partitions ---
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="8MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_8m_ota.csv"

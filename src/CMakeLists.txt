@@ -25,6 +25,7 @@ idf_component_register(
         "panel/drivers/jd79676_bwry.c"
         "panel/drivers/it8951_gray.c"
         "panel/drivers/ssd1677_gray.c"
+        "panel/drivers/ssd1683_dual.c"
         "panel/drivers/parallel_epd_gray.c"
         "panel/busy_sleep.c"
         "rtc_pcf8563.c"

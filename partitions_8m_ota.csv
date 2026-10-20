@@ -1,0 +1,17 @@
+# Generic A/B OTA layout for boards with 8 MB flash (Elecrow CrowPanel 5.79",
+# ESP32-S3-WROOM-1-N8R8).
+#
+# partitions_ota.csv ends at 0x830000 and needs a 16 MB part. Here each slot
+# is 3.875 MiB and the core dump follows them, ending at 0x7F0000.
+#
+# NVS stays at 0x9000/0x6000 to match every other Tesserae layout: a reflash
+# that skips it keeps Wi-Fi credentials and the server registration, and the
+# webflasher's offset-addressed `parts` rely on that address.
+#
+# Name,    Type, SubType,  Offset,    Size,      Flags
+nvs,       data, nvs,      0x9000,    0x6000,
+phy_init,  data, phy,      0xf000,    0x1000,
+otadata,   data, ota,      0x10000,   0x2000,
+ota_0,     app,  ota_0,    0x20000,   0x3E0000,
+ota_1,     app,  ota_1,    0x400000,  0x3E0000,
+coredump,  data, coredump, 0x7E0000,  0x10000,

@@ -68,6 +68,8 @@
 #  include "waveshare_epaper_73f.h"
 #elif defined(TESSERAE_BOARD_EPDIY_V7)
 #  include "epdiy_v7.h"
+#elif defined(TESSERAE_BOARD_ELECROW_CROWPANEL_579)
+#  include "elecrow_crowpanel_579.h"
 #else
 #  error "No TESSERAE_BOARD_* selected. Set one in platformio.ini build_flags."
 #endif

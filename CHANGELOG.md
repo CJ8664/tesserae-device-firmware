@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Elecrow CrowPanel ESP32 5.79" (`elecrow-crowpanel-579`): the 792x272
+  black-and-white panel on a new `ssd1683_dual` driver for its two cascaded
+  SSD1683 controllers. Each controller drives 396 of its 400 columns and the
+  driver inserts the 8-column seam, so the frame is the 26928-byte 1-bit
+  buffer of the `elecrow_crowpanel_579` kind. The rotary switch moves through
+  the rotation and its press re-renders, the microSD slot is on its own bus,
+  and the board has no battery sense. The module's 8 MB flash takes a new A/B
+  table (`partitions_8m_ota.csv`, `sdkconfig.8m.defaults`). The selftest and
+  the setup splash are checked on hardware; a served dashboard, the buttons,
+  deep-sleep wake and the SD slot are not yet.
+
 ## [1.48.0] - 2026-10-15
 
 ### Added
