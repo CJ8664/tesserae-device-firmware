@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "esp_err.h"
 
 #define WIFI_SCAN_MAX_NETWORKS 24
@@ -44,6 +45,12 @@ int wifi_manager_get_rssi(void);
  * reachable over IPv6 (issue #2) -- SLAAC needs a couple of seconds after
  * association, longer than the v4 DHCP the cycle normally gates on. */
 bool wifi_manager_wait_ip6_routable(uint32_t timeout_ms);
+
+/* Non-zero fingerprint (FNV-1a) of the effective SSID + password, or 0 when
+ * none are set. Lets RTC-retained state tied to "these credentials" notice
+ * that they were changed (portal, BLE, serial setup) without keeping the
+ * password itself in RTC memory. */
+uint32_t wifi_creds_fingerprint(void);
 
 /* Persist creds. `pass == ""` stores an empty password (open network);
  * `pass == NULL` keeps the currently-stored password unchanged. */

@@ -326,6 +326,20 @@ static esp_err_t load_creds(char *ssid, size_t ssid_sz, char *pass, size_t pass_
     return ESP_ERR_NVS_NOT_FOUND;
 }
 
+uint32_t wifi_creds_fingerprint(void)
+{
+    char ssid[33] = {0};
+    char pass[65] = {0};
+    if (load_creds(ssid, sizeof(ssid), pass, sizeof(pass)) != ESP_OK || !ssid[0])
+        return 0;
+    uint32_t h = 2166136261u;
+    for (const char *c = ssid; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
+    h = (h ^ 0xFFu) * 16777619u;   /* separator: "ab"+"c" != "a"+"bc" */
+    for (const char *c = pass; *c; c++) h = (h ^ (uint8_t)*c) * 16777619u;
+    memset(pass, 0, sizeof(pass));
+    return h ? h : 1u;
+}
+
 /* Fast-connect hint: the BSSID + channel of the AP we last associated with.
  * Reusing them lets esp_wifi skip the ~1-2 s all-channel scan on a wake. */
 static void save_ap_hint(void)

@@ -6,6 +6,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- A set-up panel waiting out a Wi-Fi outage no longer reopens the setup
+  portal on every retry (dmellok/tesserae#270). The portal still opens once
+  after the existing ~12 minutes of retries; if it expires unused, the panel
+  paints a "Wi-Fi unavailable" screen once and then retries the stored
+  network every 12 minutes (30 minutes after about two hours) in deep sleep,
+  with no SoftAP and no repaint per retry. Before, each 30-minute sleep was
+  followed by another 15-minute portal and a portal splash repaint. Setup
+  reopens on a power-on or RESET, a front-button press on boards with
+  buttons, or once the stored Wi-Fi credentials change; holding Refresh still
+  enters Bluetooth maintenance. A panel that was never set up, and a wrong
+  password entered in setup, behave as before. The "Wi-Fi unavailable"
+  screen clears the cached frame ETag, so the dashboard repaints when the
+  network returns instead of a 304 leaving the setup screen up.
+
+### Fixed
+
+- microSD cards that refuse CMD59 (SPI data CRC on) or time out reading the
+  SD status register now mount instead of being reported absent (#34). Both
+  steps are optional, and ESP-IDF aborts the whole card init on either; the
+  firmware wraps them so only that one failure is forgiven, with a warning in
+  the log: the card then runs without SPI data CRC, or without its
+  allocation-unit and erase hints, which FATFS does not use. Cards that mount
+  today take the same path as before. Applies to every board with an SD slot.
+  Not yet checked with either reported card.
+
 ## [1.50.0] - 2026-10-20
 
 ### Added

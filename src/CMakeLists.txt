@@ -87,6 +87,7 @@ idf_component_register(
         "deck_run.c"
         "collection_run.c"
         "sdcard.c"
+        "sdcard_lenient.c"
         "splash.c"
         "vendor/qrcodegen.c"
     INCLUDE_DIRS
@@ -120,3 +121,11 @@ idf_component_register(
         lwip
         mdns
 )
+
+# Firmware #34: let SD cards that refuse CMD59 or time out on the SD status
+# read still mount. The wrapped functions live in sdcard_lenient.c (see the
+# comment there). Applied to every env: on a board without an SD slot nothing
+# calls sdmmc_card_init, so the wraps are never pulled into the link.
+target_link_libraries(${COMPONENT_LIB} INTERFACE
+    "-Wl,--wrap=sdmmc_init_spi_crc"
+    "-Wl,--wrap=sdmmc_init_sd_ssr")
