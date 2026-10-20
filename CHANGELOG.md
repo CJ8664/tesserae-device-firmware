@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- microSD cards that refuse CMD59 (SPI data CRC on) or time out reading the
+  SD status register now mount instead of being reported absent (#34). Both
+  steps are optional, and ESP-IDF aborts the whole card init on either; the
+  firmware wraps them so only that one failure is forgiven, with a warning in
+  the log: the card then runs without SPI data CRC, or without its
+  allocation-unit and erase hints, which FATFS does not use. Cards that mount
+  today take the same path as before. Applies to every board with an SD slot.
+  Not yet checked with either reported card.
+
 ## [1.50.0] - 2026-10-20
 
 ### Added
