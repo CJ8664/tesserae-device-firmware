@@ -494,6 +494,39 @@ static void gt_log_gesture_config(void)
              C(0x8070), (C(0x8070) >> 6) & 1, C(0x8071), C(0x8072), C(0x8074),
              C(0x8075), C(0x8076), C(0x8077), C(0x8078), C(0x8079),
              C(0x807c), C(0x807d), C(0x807d) >> 7, C(0x807d) & 0x0f, C(0x807e));
+
+#ifdef TOUCH_GESTURE_HOP_DIS
+    /* Bench only (#327): set (1) or clear (0) Gesture_Hop_Dis, 0x8070 bit 6,
+     * to test whether gesture-mode frequency hopping causes the ~11 mA steps.
+     * Bernhard's E1003 reads sw3=0x00 hop=0xc5 (hopping on, forced baseline
+     * after each hop). A config write goes to the controller's own store
+     * (the guide does not say whether that is flash), so it is written only
+     * when the bit differs: once, not on every sleep. Same Config_Version
+     * with changed content is accepted (guide, 0x8047). Normal-mode touch
+     * ignores this bit. The -hoprestore env clears it again. */
+    const uint8_t sw3_want = TOUCH_GESTURE_HOP_DIS ? (C(0x8070) | 0x40)
+                                                   : (C(0x8070) & (uint8_t)~0x40);
+    if (C(0x8070) != sw3_want) {
+        C(0x8070) = sw3_want;
+        sum = 0;
+        for (size_t i = 0; i < sizeof c - 1; i++) sum += c[i];
+        uint8_t chk = (uint8_t)(~sum + 1);
+        esp_err_t e1 = gt_write_u8(0x8070, sw3_want);
+        esp_err_t e2 = gt_write_u8(0x80ff, chk);
+        esp_err_t e3 = gt_write_u8(0x8100, 0x01);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        uint8_t back = 0, back_chk = 0;
+        gt_read(0x8070, &back, 1);
+        gt_read(0x80ff, &back_chk, 1);
+        ESP_LOGW(TAG, "gesture config: wrote sw3=0x%02x chk=0x%02x (%s/%s/%s), "
+                      "reads back sw3=0x%02x chk=0x%02x",
+                 sw3_want, chk, esp_err_to_name(e1), esp_err_to_name(e2),
+                 esp_err_to_name(e3), back, back_chk);
+    } else {
+        ESP_LOGI(TAG, "gesture config: hop_dis already %d, nothing written",
+                 TOUCH_GESTURE_HOP_DIS ? 1 : 0);
+    }
+#endif
 #undef C
 }
 
