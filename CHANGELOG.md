@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Gesture-mode touch sleep logs the GT911's own gesture, frequency-hopping
+  and scan-rate config bytes (read only) before it parks the controller
+  (dmellok/tesserae#327). In gesture mode the panel idles near 1.1 mA but
+  steps to about 11 mA for a few seconds every ~17 s; the log line shows
+  whether the controller's periodic noise check is on before anything is
+  changed.
+
 ## [1.51.0] - 2026-10-21
 
 ### Changed

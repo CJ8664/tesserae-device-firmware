@@ -459,6 +459,44 @@ esp_err_t touch_capture_stroke_cb(touch_stroke_t *out,
     return ESP_OK;
 }
 
+/* Read-only dump of the GT911 config bytes that shape gesture-mode current
+ * (#327: gesture sleep idles near 1.1 mA but steps to ~11 mA for ~2.5 s every
+ * ~17 s). Seeed's firmware never writes a config, so these come from the
+ * controller's own flash. Offsets from the GT911 programming guide:
+ *   0x8047 Config_Version        0x8056 Refresh_Rate (hi nibble: gesture INT pulse)
+ *   0x8070 Module_Switch3 (bit6 Gesture_Hop_Dis)
+ *   0x8071 GESTURE_DIS           0x8072 Gesture_Long_Press_Time
+ *   0x8074 Gesture_Control       0x8075/76 Gesture_Switch1/2
+ *   0x8077 Gesture_Refresh_Rate  0x8078 Gesture_Touch_Level
+ *   0x8079 NewGreenWakeUpLevel
+ *   0x807C Noise_Detect_Times    0x807D Hopping_Flag (bit7 en, low nibble timeout s)
+ *   0x807E Hopping_Threshold     0x80FF Config_Chksum */
+#define GT_REG_CONFIG_START 0x8047
+#define GT_CONFIG_LEN       (0x80ff - GT_REG_CONFIG_START + 1)
+
+static void gt_log_gesture_config(void)
+{
+    uint8_t c[GT_CONFIG_LEN];
+    esp_err_t err = gt_read(GT_REG_CONFIG_START, c, sizeof c);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "gesture config read: %s", esp_err_to_name(err));
+        return;
+    }
+#define C(reg) c[(reg) - GT_REG_CONFIG_START]
+    uint8_t sum = 0;
+    for (size_t i = 0; i < sizeof c - 1; i++) sum += c[i];
+    uint8_t want = (uint8_t)(~sum + 1);
+    ESP_LOGI(TAG, "gesture config: ver=0x%02x chk=0x%02x(%s) refresh=0x%02x "
+                  "sw3=0x%02x(hop_dis=%d) dis=0x%02x long=0x%02x ctl=0x%02x "
+                  "gsw=0x%02x/0x%02x grate=0x%02x glvl=0x%02x green=0x%02x "
+                  "noise=0x%02x hop=0x%02x(en=%d timeout=%ds) hopthr=0x%02x",
+             C(0x8047), C(0x80ff), C(0x80ff) == want ? "ok" : "MISMATCH", C(0x8056),
+             C(0x8070), (C(0x8070) >> 6) & 1, C(0x8071), C(0x8072), C(0x8074),
+             C(0x8075), C(0x8076), C(0x8077), C(0x8078), C(0x8079),
+             C(0x807c), C(0x807d), C(0x807d) >> 7, C(0x807d) & 0x0f, C(0x807e));
+#undef C
+}
+
 void touch_prepare_sleep(bool gesture_mode)
 {
     s_gesture_this_sleep = false;
@@ -549,6 +587,7 @@ void touch_prepare_sleep(bool gesture_mode)
          * also fold INT into the ANY_LOW mask with a pull-up (that would wake
          * immediately, since INT now idles low). */
         const gpio_num_t intp = (gpio_num_t)BOARD_TOUCH_INT_PIN;
+        gt_log_gesture_config();
         gt_write_u8(GT_REG_GESTURE_ID, 0x00);
         gt_write_u8(GT_REG_COMMAND_CHK, GT_CMD_GESTURE);
         esp_rom_delay_us(1000);
