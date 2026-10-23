@@ -18,6 +18,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Bluetooth setup from the setup portal failed on boards other than the E1003:
+  with the portal up, a Sticky had about 5 KB of internal RAM free, so the BLE
+  controller could not initialise and holding Refresh returned to the hotspot
+  within a second. The same shortage made the portal splash fail to paint
+  (SPI DMA buffer allocation errors). All BLE targets now place Wi-Fi,
+  Bluetooth and lwIP static buffers in PSRAM, leaving about 90 KB free with
+  the portal running. Verified on a Sticky.
 - Bluetooth Photo experimental envs now disable OTA capability, including when
   switched to Automatic, so regular server updates cannot replace a build
   under test. Normal release targets retain OTA.
