@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.53.0] - 2026-10-23
+
 ### Added
 
 - Opt-in Bluetooth Photo v2 development envs for Seeed E1004, E1001, Sticky
