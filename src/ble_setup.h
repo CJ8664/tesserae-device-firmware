@@ -19,6 +19,7 @@
 typedef enum {
     BLE_SETUP_MODE_NEW_DEVICE = 1,
     BLE_SETUP_MODE_MAINTENANCE = 2,
+    BLE_SETUP_MODE_PHOTO = 3,
 } ble_setup_mode_t;
 
 typedef enum {
@@ -31,6 +32,9 @@ typedef enum {
     BLE_SETUP_RESULT_CLEAR_WIFI,
     BLE_SETUP_RESULT_FACTORY_RESET,
     BLE_SETUP_RESULT_ERROR,
+    /* Verified image was received and handed to the panel driver after BLE
+     * shutdown. Does not attest physical refresh success (drivers return void). */
+    BLE_SETUP_RESULT_PHOTO_RECEIVED,
 } ble_setup_result_t;
 
 /* Starts advertising, paints the QR/passkey screen, and serves one bounded

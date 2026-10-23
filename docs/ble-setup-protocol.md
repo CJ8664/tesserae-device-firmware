@@ -2,6 +2,10 @@
 
 Status: development contract, protocol major 2.
 
+The opt-in [Bluetooth Photo v2 experiment](ble-photo-v2.md) adds a persistent
+manual mode and a separate button-woken photo service on four development
+targets. The setup/maintenance protocol below remains the default release flow.
+
 BLE is a bounded local setup and maintenance channel. It does not replace the
 REST transport used for normal display operation. On supported Seeed displays
 with a Refresh button, a brand-new or factory-reset display opens its captive

@@ -34,7 +34,7 @@ jobs:
       - name: Install PlatformIO
         # Pinned below 6.2: PlatformIO 6.2.0 moves to tool-scons 4.11, which drops
         # SCons.Tool.FortranCommon and breaks the espressif32 builder script.
-        run: pip install "platformio<6.2"
+        run: pip install "platformio==6.1.19"
 
       - name: Touch coordinate tests
         run: cc -I src test/test_touch_coords.c src/touch_coords.c -o /tmp/touch-coords && /tmp/touch-coords
@@ -52,6 +52,16 @@ jobs:
         env:
           PIO_BIN: pio
         run: sh tools/test_ota_verify.sh
+
+      - name: Bluetooth Photo v2 receiver, mode recovery and frame fixtures
+        env:
+          PIO_BIN: pio
+        # The script resolves the project's pinned ESP-IDF dependency itself;
+        # it must not rely on another test step or a firmware build's cache.
+        run: sh tools/test_ble_photo.sh
+
+      - name: Bluetooth setup protocol vectors
+        run: sh tools/test_ble_setup_protocol.sh
 
       - name: Deck cache logic tests
         run: sh tools/test_deck.sh
@@ -148,7 +158,7 @@ jobs:
       - name: Install PlatformIO
         # Pinned below 6.2: PlatformIO 6.2.0 moves to tool-scons 4.11, which drops
         # SCons.Tool.FortranCommon and breaks the espressif32 builder script.
-        run: pip install "platformio<6.2"
+        run: pip install "platformio==6.1.19"
 
       - name: Build ${{ matrix.env }}
         env:
@@ -175,3 +185,39 @@ jobs:
           name: firmware-${{ matrix.env }}-v${{ steps.ver.outputs.version }}
           path: dist/
           if-no-files-found: error
+
+  photo-build:
+    name: experimental build ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env:
+          - seeed-reterminal-e1004-ble-photo
+          - seeed-reterminal-e1001-ble-photo
+          - seeed-reterminal-sticky-ble-photo
+          - seeed-reterminal-e1003-ble-photo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-photo-${{ runner.os }}-${{ hashFiles('platformio.ini', 'sdkconfig*.defaults') }}
+          restore-keys: pio-photo-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install "platformio==6.1.19"
+
+      # Compile-only validation. These opt-in environments disable automatic
+      # OTA and must stay outside the normal versioned/release artifact path:
+      # they share device kinds with production firmware.
+      - name: Build ${{ matrix.env }}
+        run: pio run -e ${{ matrix.env }}

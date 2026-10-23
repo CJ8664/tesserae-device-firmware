@@ -49,6 +49,8 @@ idf_component_register(
         "wifi_manager.c"
         "ble_setup_protocol.c"
         "ble_setup.c"
+        "ble_photo.c"
+        "ble_photo_mode.c"
         "provisioning.c"
         "setup_fields.c"
         "serial_setup.c"

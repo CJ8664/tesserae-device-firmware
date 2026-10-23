@@ -60,6 +60,7 @@
 #include "rtc_pcf8563.h"  /* board RTC seed at boot (no-op without one) */
 #include "panel/busy_sleep.h" /* light sleep gate while radios are down */
 #include "ble_setup.h"
+#include "ble_photo_mode.h"
 #include "diag_run.h"     /* detected-failure latch, reported on /status */
 #include "epd_driver.h"
 #include "image_decoder.h"
@@ -1350,12 +1351,43 @@ static bool maybe_factory_reset_hold(button_id_t woke_btn, bool first_boot)
 }
 #endif
 
+
+#if TESSERAE_BLE_PHOTO_ENABLED
+/* Manual mode deliberately bypasses always_on and the USB development loop.
+ * There are no network/advertising wakes: only a daily battery check or a
+ * physical button. Existing low-battery goodbye/recovery gates run first. */
+static void manual_photo_sleep(void)
+{
+    deck_pre_sleep();
+    led_prepare_sleep();
+    sleep_park_rails();
+#if BOARD_HAS_TOUCH
+    /* Manual photos have no touch interaction/wake. On E1003 the permanently
+     * powered GT911 must be parked even when normal touch init was skipped. */
+    touch_park_idle();
+#endif
+    buttons_arm_ext1();
+    esp_sleep_enable_timer_wakeup(24ULL * 60 * 60 * 1000000);
+    power_latch_hold_through_sleep();
+    esp_deep_sleep_start();
+}
+#endif
+
 static bool apply_ble_result(ble_setup_result_t result)
 {
     if (result == BLE_SETUP_RESULT_CONFIGURED || result == BLE_SETUP_RESULT_REBOOT ||
         result == BLE_SETUP_RESULT_CLEAR_WIFI || result == BLE_SETUP_RESULT_FACTORY_RESET)
         outage_clear();   /* setup was used: a later outage starts over */
     switch (result) {
+#if TESSERAE_BLE_PHOTO_ENABLED
+    case BLE_SETUP_RESULT_PHOTO_RECEIVED:
+        /* The local frame has replaced server content. Keep the configured
+         * transport, but only an explicit return to Automatic may run it. */
+        rest_config_set_frame_etag("");
+        ESP_ERROR_CHECK(rest_config_save());
+        manual_photo_sleep();
+        return true;
+#endif
     case BLE_SETUP_RESULT_CONFIGURED:
     case BLE_SETUP_RESULT_REBOOT:
         /* The setup splash replaced the physical panel contents. Persistently
@@ -1377,6 +1409,46 @@ static bool apply_ble_result(ble_setup_result_t result)
         return false;
     }
 }
+
+
+#if TESSERAE_BLE_PHOTO_ENABLED
+static bool run_manual_photo_mode(bool button_wake)
+{
+    bool manual = false;
+    uint8_t key[32];
+    esp_err_t err = ble_photo_mode_get(&manual, key);
+    memset(key, 0, sizeof key);
+    if (err == ESP_OK && !manual) return false;
+    if (err != ESP_OK) {
+        /* Do not silently resume network updates after corrupt/unreadable
+         * local authorization. Maintenance remains the recovery path. */
+        ESP_LOGE(TAG, "photo mode state unreadable: %s", esp_err_to_name(err));
+        manual_photo_sleep();
+        return true;
+    }
+    bool show_prompt = false;
+    err = ble_photo_mode_take_prompt(&show_prompt);
+    if (err != ESP_OK) {
+        /* A pending prompt must be consumed before either painting it or
+         * accepting a photo that a later retry could otherwise overwrite. */
+        ESP_LOGE(TAG, "photo entry prompt could not be consumed: %s", esp_err_to_name(err));
+        manual_photo_sleep();
+        return true;
+    }
+    if (show_prompt) {
+        splash_show_message("Bluetooth photo mode",
+                            "Open Companion and press Refresh once to send a photo.");
+        manual_photo_sleep();
+        return true;
+    }
+    if (button_wake) {
+        ble_setup_result_t result = ble_setup_run(BLE_SETUP_MODE_PHOTO, 10 * 60);
+        if (apply_ble_result(result)) return true;
+    }
+    manual_photo_sleep();
+    return true;
+}
+#endif
 
 /* Awake button windows used to dispatch Refresh on its first edge, making the
  * 3-second BLE gesture work only when waking from deep sleep. Enter through a
@@ -2344,6 +2416,10 @@ void app_main(void)
     battery_goodbye_check(settings_mode);
     bool maintenance_requested = maybe_factory_reset_hold(woke_btn, first_boot);
 
+#if TESSERAE_BLE_PHOTO_ENABLED
+    rest_config_load();
+    if (!maintenance_requested && run_manual_photo_mode(woke_by_button)) return;
+#endif
     ESP_ERROR_CHECK(wifi_manager_init());
     rest_config_load();
 
@@ -2360,6 +2436,11 @@ void app_main(void)
          * cycle below to restore display content even when its ETag is unchanged. */
         rest_config_set_frame_etag("");
     }
+
+#if TESSERAE_BLE_PHOTO_ENABLED
+    /* Exiting Maintenance without selecting Automatic retains manual mode. */
+    if (run_manual_photo_mode(false)) return;
+#endif
 
 #if defined(BOARD_BTN_REFRESH_PIN)
     /* Clear Wi-Fi is an authenticated Companion action, so a display that

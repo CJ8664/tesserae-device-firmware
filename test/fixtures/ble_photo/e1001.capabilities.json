@@ -1,0 +1,18 @@
+{
+  "event": "photo_capabilities",
+  "schema": 2,
+  "kind": "seeed_reterminal_e1001",
+  "width": 800,
+  "height": 480,
+  "visible_width": 800,
+  "visible_height": 480,
+  "x_offset": 0,
+  "format": "mono1-msb",
+  "stride": 100,
+  "bytes": 48000,
+  "chunk_bytes": 384,
+  "digest": "ceefa958e274c046623402f187833556545fc55b28065436498f4eb275406d41",
+  "row_order": "top_down",
+  "lifecycle": "manual",
+  "max_window": 4
+}
