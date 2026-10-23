@@ -14,5 +14,6 @@
   "digest": "ceefa958e274c046623402f187833556545fc55b28065436498f4eb275406d41",
   "row_order": "top_down",
   "lifecycle": "manual",
-  "max_window": 4
+  "max_window": 4,
+  "write_without_response": true
 }

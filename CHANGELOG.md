@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Experimental Bluetooth Photo v2 advertises optional Write Without Response
+  support for connection-sized data chunks, plus ordered status recovery after a
+  missing command. Pixel descriptors/digests and reliable-write compatibility stay
+  unchanged. Photo sessions request shorter connection intervals and log actual
+  link parameters; hardware throughput acceptance is pending.
+
 ## [1.53.0] - 2026-10-23
 
 ### Added
