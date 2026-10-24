@@ -67,11 +67,25 @@ Hardware code registry:
 | `5` | `seeed_ee02` | Enabled |
 | `6` | `seeed_ee04_75` | Enabled |
 | `7` | `seeed_ee04_73e6` | Enabled |
-| `8` | `seeed_xiao_75` | Reserved; BLE not enabled |
-| `9` | `waveshare_133e6` | Reserved; BLE not enabled |
+| `8` | `seeed_reterminal_sticky` | Enabled |
+| `9` | `seeed_ee05_213_bwry` | Enabled |
 | `10` | `waveshare_photopainter_73` | Reserved; BLE not enabled |
 | `11` | `seeed_ee03` | Enabled |
+| `12` | `m5stack_papermono` | Enabled |
+| `18` | `gooddisplay_esp32_133c02` | Enabled |
 | `19` | `soldered_inkplate_13spectra` | Enabled |
+| `20` | `picpak_4_2` | Assigned; community PicPak firmware |
+
+The old reservations of code `8` for `seeed_xiao_75` and `9` for
+`waveshare_133e6` are superseded by the active firmware assignments above.
+Those reserved targets have not enabled BLE and must receive new, unique codes
+before doing so.
+
+Older PicPak firmware advertised code `11`, which is assigned to Seeed EE03.
+Code `11` alone cannot identify PicPak. New PicPak firmware uses code `20` in
+both advertisements and device info, with the model unchanged as `picpak_4_2`.
+Companion now requires code `20` for PicPak, so update both Companion and PicPak
+firmware; PicPak firmware using code `11` is no longer recognized as PicPak.
 
 The advertisement does not expose SSID, server URL, room name, password, full
 MAC address, or device token.
