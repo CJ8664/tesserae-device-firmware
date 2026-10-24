@@ -88,22 +88,21 @@ static void fill_rect(int x, int y, int w, int h, uint8_t c)
         for (int xx = x; xx < x + w; xx++) px(xx, yy, c);
 }
 
-/* The logo bitmap is two-tone in Spectra palette values: 0x1 = the white
- * mosaic, 0x6 = the green mark. Map those to the active panel so it reads on any
- * depth: keep the Spectra palette on colour panels; on mono make the mark black;
- * on grayscale make the mark a dark tone (raw 0x1/0x6 are both near-black at
- * 4bpp gray, so the logo would otherwise vanish or smear). */
-static uint8_t logo_color(uint8_t v)
+/* The logo bitmap holds three brand tones: 0 = the ink tile, 1 = paper (the
+ * bottom-left square and the corners outside the tile), 2 = the red top-right
+ * square. Ink and paper are the panel's black and white. Red is the panel's
+ * own red where it has one; on grayscale it is a mid tone that stays apart from
+ * the ink tile, and on 1bpp a 50% checker, which reads as gray on the glass. */
+static uint8_t logo_color(uint8_t v, int x, int y)
 {
-    if (s_bpp == 1)      return (v == EPD_COL_WHITE) ? COL_WHT : COL_BLK;
-    if (s_bpp == 2) {
-        /* 2bpp panels: COL_WHT tells them apart -- 0x3 = 4-gray (dark-gray
-         * mark), 0x1 = BWR (red mark, value 0x2). */
-        if (v == 0x1) return COL_WHT;
-        return (COL_WHT == 0x3) ? 0x1 : 0x2;
-    }
-    if (COL_WHT == 0x1)  return v;                      /* Spectra: raw (green mark) */
-    return (v == 0x1) ? COL_WHT : 0x3;                  /* grayscale: white / dark-gray mark */
+    if (v == 0) return COL_BLK;
+    if (v == 1) return COL_WHT;
+    if (s_bpp == 1) return ((x ^ y) & 1) ? COL_WHT : COL_BLK;
+#ifdef EPD_COL_RED
+    return EPD_COL_RED;
+#else
+    return (s_bpp == 2) ? 0x2 : 0x9;                    /* 4-gray light / 16-gray mid */
+#endif
 }
 
 /* Logo, nearest-neighbour scaled to `size` px square, top-left at (cx-size/2, top). */
@@ -114,7 +113,8 @@ static void blit_logo(int cx, int top, int size)
         int sy = dy * TESSERAE_LOGO_H / size;
         for (int dx = 0; dx < size; dx++) {
             int sx = dx * TESSERAE_LOGO_W / size;
-            px(x0 + dx, top + dy, logo_color(tesserae_logo[sy * TESSERAE_LOGO_W + sx]));
+            px(x0 + dx, top + dy,
+               logo_color(tesserae_logo[sy * TESSERAE_LOGO_W + sx], x0 + dx, top + dy));
         }
     }
 }
