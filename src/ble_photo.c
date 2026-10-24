@@ -15,13 +15,28 @@ bool ble_photo_begin(ble_photo_rx_t *rx, uint8_t *buffer, size_t size, uint32_t 
     return true;
 }
 
-bool ble_photo_append(ble_photo_rx_t *rx, const uint8_t *packet, size_t length,
-                      size_t max_chunk, uint32_t generation)
+static bool valid_packet(const ble_photo_rx_t *rx, const uint8_t *packet, size_t length,
+                         size_t max_chunk, uint32_t generation)
 {
     if (!rx || !rx->buffer || rx->verified || generation != rx->generation || !packet || length <= 8 ||
         length - 8 > max_chunk || read_be32(packet) != rx->id) return false;
     size_t offset = read_be32(packet + 4), n = length - 8;
-    if (offset > rx->size || n > rx->size - offset || offset > rx->received) return false;
+    return offset <= rx->size && n <= rx->size - offset;
+}
+
+bool ble_photo_is_gap(const ble_photo_rx_t *rx, const uint8_t *packet, size_t length,
+                      size_t max_chunk, uint32_t generation)
+{
+    return valid_packet(rx, packet, length, max_chunk, generation) &&
+           read_be32(packet + 4) > rx->received;
+}
+
+bool ble_photo_append(ble_photo_rx_t *rx, const uint8_t *packet, size_t length,
+                      size_t max_chunk, uint32_t generation)
+{
+    if (!valid_packet(rx, packet, length, max_chunk, generation)) return false;
+    size_t offset = read_be32(packet + 4), n = length - 8;
+    if (offset > rx->received) return false;
     if (offset < rx->received) {
         return n <= rx->received - offset && memcmp(rx->buffer + offset, packet + 8, n) == 0;
     }

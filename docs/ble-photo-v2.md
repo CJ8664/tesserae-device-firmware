@@ -136,7 +136,7 @@ Example exact E1004 descriptor (minified size is under the 512-byte control
 message limit):
 
 ```json
-{"event":"photo_capabilities","schema":2,"kind":"seeed_reterminal_e1004","width":1200,"height":1600,"visible_width":1200,"visible_height":1600,"x_offset":0,"format":"spectra6-msb","stride":600,"bytes":960000,"chunk_bytes":384,"digest":"e4a1365bc0232bd2666dbd403055fa710ab6cbe60cf2eaa2805140a7ea5f0f3f","row_order":"top_down","lifecycle":"manual","max_window":4}
+{"event":"photo_capabilities","schema":2,"kind":"seeed_reterminal_e1004","width":1200,"height":1600,"visible_width":1200,"visible_height":1600,"x_offset":0,"format":"spectra6-msb","stride":600,"bytes":960000,"chunk_bytes":384,"digest":"e4a1365bc0232bd2666dbd403055fa710ab6cbe60cf2eaa2805140a7ea5f0f3f","row_order":"top_down","lifecycle":"manual","max_window":4,"write_without_response":true}
 ```
 
 Rows are top to bottom. The left pixel occupies the most significant bit(s) or
@@ -203,20 +203,45 @@ pipeline, with no new ACK batching or compression format:
 `id` must be a nonzero UInt32. Schema, byte count, format and descriptor digest
 must match current capabilities. Send logical binary packets to characteristic
 0006 as `[id:UInt32 big endian][offset:UInt32 big endian][1..384 pixel bytes]`,
-inside the existing BLE v2 encrypted/chunked framing. Each receives
-`photo_ack` with the next expected offset. An exact duplicate may be ACKed
-without appending; conflicting retries, future offsets, wrong IDs and out of
-bounds packets are rejected. ACK offsets are cumulative across all received
-packets, so a later ACK also confirms earlier packets whose notifications were
-lost. Send `photo_end` only after the entire frame is ACKed, never merely when
-all packets have been queued. Duplicate/stale ACKs cannot advance the sender.
+inside the existing BLE v2 encrypted/chunked framing. Each receives `photo_ack`
+with the next expected offset. An exact duplicate may be ACKed without
+appending. A valid future-offset packet leaves the buffer unchanged and ACKs the
+current offset so a dropped Write Command can be recovered; conflicting retries,
+wrong IDs/generations and out-of-bounds packets still return errors. ACK offsets
+are cumulative across all received packets, so a later ACK also confirms earlier
+packets whose notifications were lost. Send `photo_end` only after the entire
+frame is ACKed, never merely when all packets have been queued. Duplicate/stale
+ACKs cannot advance the sender.
 
-Companion keeps ATT writes ordered and uses writes with response as before.
-An eight-second timeout retries only the oldest unconfirmed logical packet,
-with fresh AEAD counters. The receiver answers with its current cumulative
-offset. Replaying the whole window could leave duplicate packets queued beside
-new ones after a late ACK, exceeding the queue bound. Normal progress resets
-the two-retry budget. A session disconnect still discards incomplete data.
+The authenticated optional `write_without_response:true` capability allows photo
+data to use ATT Write Commands only if characteristic 0006 also advertises that
+property. Control remains Write With Response. `chunk_bytes:384` is a receiver
+maximum; choose `min(384, maximumWriteValueLength(.withoutResponse) - 33)` pixel
+bytes for each connection (also for reliable writes), including the 8-byte photo
+header, 4-byte fragment header and 21-byte encrypted envelope. A nonpositive
+result falls back to the existing reliable-write fragmentation path. For example
+MTU 256 allows 220 pixel bytes; this is an example, not a hardcoded MTU. Respect
+CoreBluetooth write readiness, ordered counters and the advertised
+logical-packet window. Older firmware lacks this capability and older apps may
+continue their existing reliable writes.
+
+On a Write Command timeout, stop refilling, drain the phone's local write queue,
+and send `{"op":"photo_status","id":123,"request":7}` with response. Both
+control and data are ordered on the same receiver worker queue; the matching
+`{"event":"photo_status","id":123,"request":7,"offset":220}` is a drain barrier.
+Ignore normal ACKs for refill while waiting, then discard old in-flight records
+and restart the bounded window at the returned offset using fresh encrypted
+frames. The status offset must be a sent packet boundary within the already sent
+range; status never begins a new transfer or changes the buffer. Use a fresh
+nonzero UInt32 `request` for each barrier and accept only the matching reply, so
+a delayed status cannot restart a later window. Limit no-progress recovery to
+two attempts. This prevents a lost command from creating a permanent trailing
+gap or a late ACK from allowing old and new windows to overfill the queue.
+
+For reliable writes, an eight-second timeout still retries only the oldest
+unconfirmed logical packet with fresh AEAD counters. Its ACK reports the current
+cumulative offset; do not replay the whole outstanding window. Normal progress
+resets the retry budget. Disconnect discards incomplete data.
 
 Photo events no longer incur the fixed 15 ms sleep after every notification
 fragment. NimBLE enqueue congestion instead retries for at most 100 ms per
@@ -225,6 +250,14 @@ generation/cancellation with fresh encryption counters; other errors stop the
 event. Cumulative ACK/retry recovers a missing data ACK. Existing non-photo
 notification pacing remains. This is bounded queue handling, not a measured
 BLE throughput or energy result.
+
+Photo sessions request a 15–30 ms connection interval, zero peripheral latency
+and a 4-second supervision timeout using NimBLE `ble_gap_update_params`. The
+central can refuse; refusal does not terminate the session. Connection/update/MTU
+logs report actual interval, latency, timeout and MTU for hardware comparisons.
+These preferences follow [Apple QA1931](https://developer.apple.com/library/archive/qa/qa1931/)
+and the [ESP-IDF NimBLE connection API](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/ble/get-started/ble-connection.html);
+they do not determine or prove maximum throughput.
 
 ```json
 {"op":"photo_end","id":123}
@@ -408,9 +441,10 @@ separate acceptance steps.
   mode blob, confirm explicit read-error diagnostics, then restore Automatic
   without erasing network/server credentials; verify actual NVS write failures
   remain errors. Host fault injection does not prove flash power-loss behavior.
-- Compare window 1 (older Companion) and window 4 with identical frames, MTU,
-  RSSI and connection conditions; record transfer-only time, retries, refresh
-  time and current separately. No physical speed or power result is available.
+- Compare reliable writes/window 1 (older Companion) and negotiated Write
+  Commands/window 4 with identical frames, MTU, RSSI and connection conditions;
+  record transfer-only time, retries, refresh time and current separately. No
+  physical speed or power result is available.
 - Test low battery, charging/recovery, practical 960 KB/1.31 MB throughput, MTU/packet
   fragmentation, RSSI/retry behavior, panel refresh current and asleep current.
 - On E1003, check the asymmetric nibble/orientation pattern and memory headroom

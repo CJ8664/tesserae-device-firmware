@@ -610,7 +610,8 @@ static bool prepare_photo_capabilities(void)
                  "\"width\":%u,\"height\":%u,\"visible_width\":%u,\"visible_height\":%u,"
                  "\"x_offset\":0,\"format\":\"%s\",\"stride\":%u,\"bytes\":%u,"
                  "\"chunk_bytes\":384,\"digest\":\"%s\",\"row_order\":\"top_down\","
-                 "\"lifecycle\":\"manual\",\"max_window\":%u}",
+                 "\"lifecycle\":\"manual\",\"max_window\":%u,"
+                 "\"write_without_response\":true}",
                  TESSERAE_DEVICE_KIND, info->width, info->height, info->width,
                  info->height, s_photo_format, (unsigned)stride,
                  (unsigned)info->buf_bytes, s_photo_digest, (unsigned)PHOTO_WINDOW_PACKETS);
@@ -648,8 +649,10 @@ static void process_photo_packet(const command_t *command)
 {
     if (s_mode != BLE_SETUP_MODE_PHOTO ||
         command->auth != s_photo_auth ||
-        !ble_photo_append(&s_photo_rx, (const uint8_t *)command->json, command->len,
-                          PHOTO_CHUNK_BYTES, command->generation)) {
+        (!ble_photo_append(&s_photo_rx, (const uint8_t *)command->json, command->len,
+                           PHOTO_CHUNK_BYTES, command->generation) &&
+         !ble_photo_is_gap(&s_photo_rx, (const uint8_t *)command->json, command->len,
+                           PHOTO_CHUNK_BYTES, command->generation))) {
         send_simple(command->auth, "error", "Invalid photo packet");
         return;
     }
@@ -713,6 +716,21 @@ static void process_photo_command(const command_t *command, const cJSON *root, c
     if (!s_photo_rx.buffer || s_photo_rx.id != id ||
         s_photo_rx.generation != command->generation || s_photo_auth != command->auth) {
         send_simple(command->auth, "error", "No matching photo transfer");
+        return;
+    }
+    if (strcmp(op, "photo_status") == 0) {
+        uint32_t request;
+        if (!json_u32(root, "request", &request) || request == 0) {
+            send_simple(command->auth, "error", "Invalid photo status request");
+            return;
+        }
+        /* Ordered with binary data on the same worker queue: this reply is a
+         * drain barrier before a client refills after a Write Command loss. */
+        char json[96];
+        snprintf(json, sizeof json,
+                 "{\"event\":\"photo_status\",\"id\":%" PRIu32 ",\"request\":%" PRIu32
+                 ",\"offset\":%u}", s_photo_rx.id, request, (unsigned)s_photo_rx.received);
+        send_event(command->auth, json);
         return;
     }
     if (strcmp(op, "photo_cancel") == 0) {
@@ -1031,7 +1049,7 @@ static struct ble_gatt_svc_def s_services[] = {{
     {
         .uuid = &s_photo_uuid.u, .access_cb = gatt_access, .arg = (void *)5,
         /* Photo mode uses only the QR AES-GCM envelope and stored photo key. */
-        .flags = BLE_GATT_CHR_F_WRITE,
+        .flags = BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
     },
 #endif
     {0}}
@@ -1102,6 +1120,31 @@ static void host_task(void *arg)
     vTaskSuspend(NULL);
 }
 
+static void log_photo_link(uint16_t conn)
+{
+    if (s_mode != BLE_SETUP_MODE_PHOTO) return;
+    struct ble_gap_conn_desc desc;
+    if (ble_gap_conn_find(conn, &desc) != 0) return;
+    ESP_LOGI(TAG, "photo link: interval=%u.%02u ms latency=%u timeout=%u ms mtu=%u",
+             (unsigned)(desc.conn_itvl * 5 / 4), (unsigned)((desc.conn_itvl * 25) % 100),
+             (unsigned)desc.conn_latency, (unsigned)desc.supervision_timeout * 10,
+             (unsigned)ble_att_mtu(conn));
+}
+
+static void request_photo_link(uint16_t conn)
+{
+    if (s_mode != BLE_SETUP_MODE_PHOTO) return;
+    /* 15–30 ms, zero peripheral latency, 4 s supervision timeout. This is a
+     * preference, not a throughput guarantee; the central may decline it. */
+    const struct ble_gap_upd_params params = {
+        .itvl_min = 12, .itvl_max = 24, .latency = 0,
+        .supervision_timeout = 400,
+    };
+    int rc = ble_gap_update_params(conn, &params);
+    if (rc != 0) ESP_LOGI(TAG, "photo connection preference not applied: %d", rc);
+    log_photo_link(conn);
+}
+
 static int gap_event(struct ble_gap_event *event, void *arg)
 {
     (void)arg;
@@ -1127,6 +1170,7 @@ static int gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(TAG,
                      "phone connected over BLE (handle=%u, host stack low-watermark=%u)",
                      s_conn, (unsigned)stack_after);
+            request_photo_link(s_conn);
         } else {
             ESP_LOGW(TAG, "BLE connection failed (status=%d)", event->connect.status);
             if (!s_stopping) advertise();
@@ -1158,6 +1202,16 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         }
 #endif
         if (!s_stopping) advertise();
+        return 0;
+    case BLE_GAP_EVENT_CONN_UPDATE:
+        if (s_mode == BLE_SETUP_MODE_PHOTO) {
+            if (event->conn_update.status != 0)
+                ESP_LOGI(TAG, "photo connection update declined: %d", event->conn_update.status);
+            log_photo_link(event->conn_update.conn_handle);
+        }
+        return 0;
+    case BLE_GAP_EVENT_MTU:
+        log_photo_link(event->mtu.conn_handle);
         return 0;
     case BLE_GAP_EVENT_SUBSCRIBE:
         if (event->subscribe.attr_handle == s_event_handle)

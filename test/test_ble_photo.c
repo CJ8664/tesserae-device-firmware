@@ -24,6 +24,10 @@ int main(void)
     assert(!ble_photo_append(&rx, packet, 12, 8, 2)); /* stale generation */
     be32(packet + 4, 1);
     assert(!ble_photo_append(&rx, packet, 12, 8, 1)); /* future offset */
+    assert(ble_photo_is_gap(&rx, packet, 12, 8, 1));
+    assert(!ble_photo_is_gap(&rx, packet, 12, 8, 2)); /* stale session */
+    assert(!ble_photo_is_gap(&rx, packet, 17, 8, 1)); /* oversized */
+    assert(rx.received == 0);
     be32(packet + 4, 0); be32(packet, 6);
     assert(!ble_photo_append(&rx, packet, 12, 8, 1)); /* different transfer */
     be32(packet, 5);
@@ -36,6 +40,7 @@ int main(void)
     packet[8] ^= 1;
     assert(!ble_photo_finish(&rx, sha, sha, 1)); /* incomplete */
     be32(packet + 4, UINT32_MAX);
+    assert(!ble_photo_is_gap(&rx, packet, 12, 8, 1)); /* not a valid gap */
     assert(!ble_photo_append(&rx, packet, 12, 8, 1));
     be32(packet + 4, 4);
     assert(!ble_photo_append(&rx, packet, 16, 8, 1)); /* overflow */
@@ -72,6 +77,35 @@ int main(void)
     assert(rx.received == sizeof window_buffer);
     for (size_t i = 0; i < sizeof window_buffer; i++) assert(window_buffer[i] == i);
     assert(ble_photo_finish(&rx, sha, sha, 4));
+    ble_photo_cancel(&rx);
+
+    /* MTU 256 permits 220 pixel bytes after 33 bytes of encrypted framing.
+     * A dropped Write Command must not copy later data across the gap. After
+     * the status barrier reports 220, resend from there with variable sizes. */
+    uint8_t dynamic_buffer[731], dynamic_packet[228];
+    memset(dynamic_buffer, 0xee, sizeof dynamic_buffer);
+    assert(ble_photo_begin(&rx, dynamic_buffer, sizeof dynamic_buffer, 11, 5));
+    be32(dynamic_packet, 11); be32(dynamic_packet + 4, 0);
+    memset(dynamic_packet + 8, 0x31, 220);
+    assert(ble_photo_append(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
+    be32(dynamic_packet + 4, 440); /* packet at 220 was lost */
+    assert(ble_photo_is_gap(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
+    assert(!ble_photo_append(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
+    assert(rx.received == 220 && dynamic_buffer[440] == 0xee);
+    while (rx.received < sizeof dynamic_buffer) {
+        size_t n = sizeof dynamic_buffer - rx.received;
+        if (n > 220) n = 220;
+        be32(dynamic_packet + 4, (uint32_t)rx.received);
+        assert(ble_photo_append(&rx, dynamic_packet, 8 + n, 384, 5));
+    }
+    be32(dynamic_packet + 4, 220);
+    assert(ble_photo_append(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
+    dynamic_packet[8] ^= 1;
+    assert(!ble_photo_append(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
+    assert(!ble_photo_is_gap(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
+    for (size_t i = 0; i < sizeof dynamic_buffer; i++) assert(dynamic_buffer[i] == 0x31);
+    assert(ble_photo_finish(&rx, sha, sha, 5));
+    assert(!ble_photo_is_gap(&rx, dynamic_packet, sizeof dynamic_packet, 384, 5));
     ble_photo_cancel(&rx);
 
     /* Maximum supported frame, including the final short chunk.
