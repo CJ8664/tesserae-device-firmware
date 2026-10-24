@@ -226,7 +226,9 @@ esp_err_t touch_init(void)
      * front: a held pad ignores every gpio_config() below, so the warm path --
      * which never runs the reset sequence that does its own release -- would
      * otherwise read the line through a pad still driving it. */
-    gpio_hold_dis((gpio_num_t)BOARD_TOUCH_INT_PIN);
+#if !(defined(CONFIG_IDF_TARGET_ESP32) && (BOARD_TOUCH_INT_PIN >= 34))
+    gpio_hold_dis((gpio_num_t)BOARD_TOUCH_INT_PIN);   /* input-only pads have no hold to release */
+#endif
 
     touch_power_on();
 

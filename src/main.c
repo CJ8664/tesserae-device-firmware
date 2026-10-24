@@ -675,6 +675,24 @@ static void rtc_power_off_or_return(int interval_s)
 }
 #endif
 
+/* Rails that must be ON while awake and that sleep_park_rails() turns off:
+ * release the hold left by the last sleep and drive them high, before any
+ * peripheral behind them is touched. The M5Paper's 5 V boost (GPIO5) is one.
+ * No-op without a mask. */
+static void rails_wake(void)
+{
+#ifdef BOARD_WAKE_DRIVE_HIGH_MASK
+    uint64_t mask = BOARD_WAKE_DRIVE_HIGH_MASK;
+    for (int pin = 0; pin < 64; pin++) {
+        if (!(mask & (1ULL << pin))) continue;
+        gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+        gpio_set_level((gpio_num_t)pin, 1);
+        gpio_hold_dis((gpio_num_t)pin);
+        gpio_set_level((gpio_num_t)pin, 1);
+    }
+#endif
+}
+
 static void sleep_forever_or_until_timer(void)
 {
     buzzer_idle();   /* never leave the piezo driven across a sleep (#258) */
@@ -1561,11 +1579,9 @@ void app_main(void)
      * held, so every line below would be racing the user's thumb. No-op
      * elsewhere. See power_latch.h. */
     power_latch_hold();
-    /* Rails this firmware never uses, parked low from the first instruction
-     * rather than from sleep entry: on the M5Paper the Grove 5 V boost's
-     * enable is a strapping pin that idles pulled up, so until now the boost
-     * ran for every wake. No-op without BOARD_SLEEP_DRIVE_LOW_MASK. */
-    sleep_park_rails();
+    /* Rails the panel path needs, switched on before anything behind them
+     * runs: the M5Paper's 5 V boost, which sleep entry switches off. */
+    rails_wake();
     /* Log capture next, so the uploadable log covers as much of the wake as
      * it can. UART output is unchanged. */
     log_capture_init();

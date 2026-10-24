@@ -108,14 +108,16 @@
  * or a timed wake becomes a power-off. */
 #define BOARD_POWER_LATCH_PIN   2
 
-/* GPIO5 (M5EPD_EXT_PWR_EN_PIN) gates the Grove Port A 5 V boost, HIGH = on
- * (M5EPD enableEXTPower() writes 1; M5Unified setExtOutput(true) drives it
- * high). Nothing on this firmware uses the port, and GPIO5 is a strapping
- * pin whose internal pull-up is on after reset, so "not driven" meant the
- * boost was free to run for the whole wake and to float through the sleep.
- * Driven low and held, at boot (sleep_park_rails() runs first thing in
- * app_main()) and again at sleep entry. GPIO5 has a digital-pad hold on the
+/* GPIO5 (M5EPD_EXT_PWR_EN_PIN) gates the 5 V boost, HIGH = on. M5EPD's
+ * begin() and M5Unified's default config both switch it on before touching
+ * the panel, and a bench run on 2026-10-25 with it driven low from boot
+ * browned the chip out as the IT8951 powered up for the splash, so the rail
+ * is not just the Grove port's: the panel path needs it. Driven HIGH at boot
+ * (rails_wake(), first thing in app_main(); the pad's reset state is a weak
+ * pull-up, so it was on by accident before) and LOW at sleep entry, after the
+ * panel is off, held through the sleep. GPIO5 has a digital-pad hold on the
  * classic ESP32 (RTC_CNTL_DIG_PAD_HOLD bit 8). */
+#define BOARD_WAKE_DRIVE_HIGH_MASK  (1ULL << 5)
 #define BOARD_SLEEP_DRIVE_LOW_MASK  (1ULL << 5)
 
 /* The panel rail (GPIO23) is driven low at sleep entry by it8951_sleep() and

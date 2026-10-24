@@ -295,9 +295,21 @@ static void hw_reset_and_power(void)
     gpio_set_level(EPD_PIN_CS, 1);
     vTaskDelay(pdMS_TO_TICKS(50));
 
+#if EPD_PIN_RST != EPD_PIN_EN
     gpio_set_level(EPD_PIN_RST, 1); vTaskDelay(pdMS_TO_TICKS(50));
     gpio_set_level(EPD_PIN_RST, 0); vTaskDelay(pdMS_TO_TICKS(10));
     gpio_set_level(EPD_PIN_RST, 1); vTaskDelay(pdMS_TO_TICKS(50));
+#else
+    /* M5Paper: RST, EN and VCC_EN are one line (GPIO23, the controller's
+     * power rail). The 500 ms off-window above is the reset; pulsing the
+     * "reset" here would switch the rail off for 10 ms and back on, and the
+     * second inrush into the module's half-discharged bulk caps browned the
+     * ESP32 out on every cold-boot splash (bench 2026-10-25, on USB; on
+     * battery a brownout reset drops the GPIO2 latch and the board is simply
+     * off until someone presses the power button). M5GFX does one off/on
+     * (_pin_reset(GPIO23)) and nothing more. */
+    vTaskDelay(pdMS_TO_TICKS(100));
+#endif
     wait_ready();
 }
 

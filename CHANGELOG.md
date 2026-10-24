@@ -26,10 +26,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - M5Stack M5Paper: the panel rail enable (GPIO23) is held low through deep
   sleep (`BOARD_EPD_HOLD_RAILS_IN_SLEEP`, as the E1003 since 1.4x), and the
-  Grove port's 5 V boost enable (GPIO5, a strapping pin that idles pulled up)
-  is driven low from the first instruction of every boot and held through
-  sleep. Before this the boost could run for every wake and both enables
-  floated for the whole sleep.
+  5 V boost enable (GPIO5) is driven high at boot and low at sleep entry,
+  held through the sleep. Before this both enables floated for the whole
+  sleep, and the boost ran on the strength of the pad's reset pull-up. The
+  boost feeds the panel path, not only the Grove port: a bench run with it
+  driven low from boot browned the chip out as the IT8951 powered up.
+- M5Stack M5Paper: the IT8951 bring-up no longer pulses the "reset" line
+  after powering the controller. On this board reset, enable and power are
+  one GPIO (23), so the pulse switched the controller's rail off for 10 ms
+  and on again, and the second inrush browned the ESP32 out (3.3 V below
+  2.43 V) on every cold-boot splash, seen on the bench on 2026-10-25 on USB.
+  On battery a brownout reset drops the GPIO2 latch, so the board was simply
+  off until someone pressed the power button, which is the likely cause of
+  the "only updates when I press a button" reports. The 500 ms off-window is
+  the reset, as in M5GFX. Verified on the bench: the splash and a full frame
+  paint through without a reset.
 - M5Stack M5Paper: with touch off, the GT911 park no longer tries to drive
   and hold TP_INT (GPIO36, an input-only pad), which failed with a logged
   error on every sleep; it sends the sleep command and logs the level the
