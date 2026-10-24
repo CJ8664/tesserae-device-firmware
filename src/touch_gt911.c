@@ -499,11 +499,11 @@ static void gt_log_gesture_config(void)
     /* Bench only (#327): set (1) or clear (0) Gesture_Hop_Dis, 0x8070 bit 6,
      * to test whether gesture-mode frequency hopping causes the ~11 mA steps.
      * Bernhard's E1003 reads sw3=0x00 hop=0xc5 (hopping on, forced baseline
-     * after each hop). A config write goes to the controller's own store
-     * (the guide does not say whether that is flash), so it is written only
-     * when the bit differs: once, not on every sleep. Same Config_Version
-     * with changed content is accepted (guide, 0x8047). Normal-mode touch
-     * ignores this bit. The -hoprestore env clears it again. */
+     * after each hop). Written only when the bit differs. On an E1003 the
+     * write did not survive the wake's controller reset (the next sleep read
+     * sw3=0x00 again), so in practice it is rewritten before every gesture
+     * sleep. Same Config_Version with changed content is accepted (guide,
+     * 0x8047). Normal-mode touch ignores this bit. -hoprestore clears it. */
     const uint8_t sw3_want = TOUCH_GESTURE_HOP_DIS ? (C(0x8070) | 0x40)
                                                    : (C(0x8070) & (uint8_t)~0x40);
     if (C(0x8070) != sw3_want) {
