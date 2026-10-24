@@ -203,36 +203,40 @@ pipeline, with no new ACK batching or compression format:
 `id` must be a nonzero UInt32. Schema, byte count, format and descriptor digest
 must match current capabilities. Send logical binary packets to characteristic
 0006 as `[id:UInt32 big endian][offset:UInt32 big endian][1..384 pixel bytes]`,
-inside the existing BLE v2 encrypted/chunked framing. Each receives
-`photo_ack` with the next expected offset. An exact duplicate may be ACKed
-without appending. A valid future-offset packet leaves the buffer unchanged and
-ACKs the current offset so a dropped Write Command can be recovered; conflicting
-retries, wrong IDs/generations and out-of-bounds packets still return errors. ACK offsets are cumulative across all received packets, so a later ACK also confirms earlier packets whose notifications were
-lost. Send `photo_end` only after the entire frame is ACKed, never merely when
-all packets have been queued. Duplicate/stale ACKs cannot advance the sender.
+inside the existing BLE v2 encrypted/chunked framing. Each receives `photo_ack`
+with the next expected offset. An exact duplicate may be ACKed without
+appending. A valid future-offset packet leaves the buffer unchanged and ACKs the
+current offset so a dropped Write Command can be recovered; conflicting retries,
+wrong IDs/generations and out-of-bounds packets still return errors. ACK offsets
+are cumulative across all received packets, so a later ACK also confirms earlier
+packets whose notifications were lost. Send `photo_end` only after the entire
+frame is ACKed, never merely when all packets have been queued. Duplicate/stale
+ACKs cannot advance the sender.
 
-The authenticated optional `write_without_response:true` capability allows
-photo data to use ATT Write Commands only if characteristic 0006 also advertises
-that property. Control remains Write With Response. `chunk_bytes:384` is a
-receiver maximum; choose `min(384, maximumWriteValueLength(.withoutResponse) - 33)`
-pixel bytes for each connection (also for reliable writes), including the 8-byte
-photo header, 4-byte fragment header and 21-byte encrypted envelope. A nonpositive result falls back
-to the existing reliable-write fragmentation path. For example MTU 256 allows
-220 pixel bytes; this is an example, not a hardcoded MTU. Respect CoreBluetooth write readiness,
-ordered counters and the advertised logical-packet window. Older firmware lacks
-this capability and older apps may continue their existing reliable writes.
+The authenticated optional `write_without_response:true` capability allows photo
+data to use ATT Write Commands only if characteristic 0006 also advertises that
+property. Control remains Write With Response. `chunk_bytes:384` is a receiver
+maximum; choose `min(384, maximumWriteValueLength(.withoutResponse) - 33)` pixel
+bytes for each connection (also for reliable writes), including the 8-byte photo
+header, 4-byte fragment header and 21-byte encrypted envelope. A nonpositive
+result falls back to the existing reliable-write fragmentation path. For example
+MTU 256 allows 220 pixel bytes; this is an example, not a hardcoded MTU. Respect
+CoreBluetooth write readiness, ordered counters and the advertised
+logical-packet window. Older firmware lacks this capability and older apps may
+continue their existing reliable writes.
 
 On a Write Command timeout, stop refilling, drain the phone's local write queue,
-and send `{"op":"photo_status","id":123,"request":7}` with response. Both control and data
-are ordered on the same receiver worker queue; the matching
-`{"event":"photo_status","id":123,"request":7,"offset":220}` is a drain barrier. Ignore
-normal ACKs for refill while waiting, then discard old in-flight records and
-restart the bounded window at the returned offset using fresh encrypted frames.
-The status offset must be a sent packet boundary within the already sent range;
-status never begins a new transfer or changes the buffer. Use a fresh nonzero
-UInt32 `request` for each barrier and accept only the matching reply, so a delayed status cannot restart a later window. Limit no-progress
-recovery to two attempts. This prevents a lost command from creating a permanent
-trailing gap or a late ACK from allowing old and new windows to overfill the queue.
+and send `{"op":"photo_status","id":123,"request":7}` with response. Both
+control and data are ordered on the same receiver worker queue; the matching
+`{"event":"photo_status","id":123,"request":7,"offset":220}` is a drain barrier.
+Ignore normal ACKs for refill while waiting, then discard old in-flight records
+and restart the bounded window at the returned offset using fresh encrypted
+frames. The status offset must be a sent packet boundary within the already sent
+range; status never begins a new transfer or changes the buffer. Use a fresh
+nonzero UInt32 `request` for each barrier and accept only the matching reply, so
+a delayed status cannot restart a later window. Limit no-progress recovery to
+two attempts. This prevents a lost command from creating a permanent trailing
+gap or a late ACK from allowing old and new windows to overfill the queue.
 
 For reliable writes, an eight-second timeout still retries only the oldest
 unconfirmed logical packet with fresh AEAD counters. Its ACK reports the current
@@ -437,9 +441,10 @@ separate acceptance steps.
   mode blob, confirm explicit read-error diagnostics, then restore Automatic
   without erasing network/server credentials; verify actual NVS write failures
   remain errors. Host fault injection does not prove flash power-loss behavior.
-- Compare reliable writes/window 1 (older Companion) and negotiated Write Commands/window 4 with identical frames, MTU,
-  RSSI and connection conditions; record transfer-only time, retries, refresh
-  time and current separately. No physical speed or power result is available.
+- Compare reliable writes/window 1 (older Companion) and negotiated Write
+  Commands/window 4 with identical frames, MTU, RSSI and connection conditions;
+  record transfer-only time, retries, refresh time and current separately. No
+  physical speed or power result is available.
 - Test low battery, charging/recovery, practical 960 KB/1.31 MB throughput, MTU/packet
   fragmentation, RSSI/retry behavior, panel refresh current and asleep current.
 - On E1003, check the asymmetric nibble/orientation pattern and memory headroom
