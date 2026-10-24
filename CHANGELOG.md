@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Correct the BLE hardware registry to match Sticky (8) and EE05 (9), add
+  PaperMono (12) and GoodDisplay 13.3-inch (18), and assign PicPak code 20.
+  Document the old PicPak/EE03 code 11 conflict and the requirement to update
+  both Companion and PicPak firmware to use code 20.
+
 ## [1.54.0] - 2026-10-24
 
 ### Added
