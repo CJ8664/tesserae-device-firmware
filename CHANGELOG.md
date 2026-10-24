@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.55.0] - 2026-10-24
+
+### Changed
+
+- The boot and setup splashes show the new Tesserae mark: an ink tile with a
+  red top-right square and a paper bottom-left one. Colour panels draw the
+  red in their own red; grayscale panels use a mid grey and 1-bit panels a
+  fine checker.
+
 ### Fixed
 
 - Correct the BLE hardware registry to match Sticky (8) and EE05 (9), add
