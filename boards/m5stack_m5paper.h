@@ -26,6 +26,20 @@
  * three side buttons, the SHT30 sensor, and GT911 touch dispatch through the
  * server. Not wired: microSD (deck cache), and deep-sleep wake for touch or
  * the outer buttons -- the classic ESP32's ext1 has no ANY_LOW mode.
+ *
+ * POWER, 2026-10-25 (unbenched, from a server battery log that showed ~20 %
+ * a day at a 15-minute interval, about 9 mA average on the 1150 mAh cell):
+ * on battery the firmware no longer deep-sleeps between wakes. It programs
+ * the BM8563's countdown timer, drops the main-rail latch (GPIO2) and lets
+ * the board switch itself OFF; the RTC's INT line powers it back on when the
+ * timer runs out, exactly as M5EPD's shutdown(seconds) does. Off draws what
+ * the RTC and the always-on charger path draw, not what three unheld rails
+ * and a scanning digitiser draw through a deep sleep. On USB the latch drop
+ * does nothing (the USB rail holds the board up), so the same path falls
+ * through to an ordinary timed deep sleep. Consequences: the wheel buttons
+ * cannot wake a board that is off (the power button and the RTC can), and
+ * RTC RAM does not survive it, so the retry / outage / low-battery paths,
+ * which keep state there, still deep-sleep. See BOARD_RTC_POWER_OFF.
  */
 #pragma once
 
@@ -94,9 +108,45 @@
  * or a timed wake becomes a power-off. */
 #define BOARD_POWER_LATCH_PIN   2
 
-/* GPIO5 (M5EPD_EXT_PWR_EN_PIN) gates the Grove Port A 5 V boost. Left low:
- * nothing on this firmware drives the external port, and the boost is pure
- * drain on battery. Recorded, not driven. */
+/* GPIO5 (M5EPD_EXT_PWR_EN_PIN) gates the Grove Port A 5 V boost, HIGH = on
+ * (M5EPD enableEXTPower() writes 1; M5Unified setExtOutput(true) drives it
+ * high). Nothing on this firmware uses the port, and GPIO5 is a strapping
+ * pin whose internal pull-up is on after reset, so "not driven" meant the
+ * boost was free to run for the whole wake and to float through the sleep.
+ * Driven low and held, at boot (sleep_park_rails() runs first thing in
+ * app_main()) and again at sleep entry. GPIO5 has a digital-pad hold on the
+ * classic ESP32 (RTC_CNTL_DIG_PAD_HOLD bit 8). */
+#define BOARD_SLEEP_DRIVE_LOW_MASK  (1ULL << 5)
+
+/* The panel rail (GPIO23) is driven low at sleep entry by it8951_sleep() and
+ * then, with this, HELD low through the sleep. Without the hold the pad
+ * isolates at deep-sleep entry and the load switch's enable floats for the
+ * whole interval; on the E1003 the same fix went in against server #327.
+ * GPIO23 is a digital pad with a hold bit (RTC_CNTL_DIG_PAD_HOLD bit 16), so
+ * gpio_hold_en() is supported here; the driver releases it on the next
+ * wake in it8951_port_init(). */
+#define BOARD_EPD_HOLD_RAILS_IN_SLEEP  1
+
+/* ------------------------------------------------------------------ */
+/* BM8563 RTC (PCF8563-compatible) on the internal I2C bus at 0x51     */
+/* ------------------------------------------------------------------ */
+/* Two jobs. First, the one the reTerminals use it for: seed the system clock
+ * before Wi-Fi so quiet hours and wake alignment work on a boot that never
+ * reaches NTP. Second, the one that matters on this board: its countdown
+ * timer pulls INT low when it expires, and on the M5Paper INT is wired into
+ * the power-on circuit, so an alarm turns a powered-off board back on. The
+ * driver's init clears the timer/alarm flags on every boot; left set, INT
+ * stays low and the board cannot switch itself off again. */
+#define BOARD_HAS_PCF8563          1
+#define BOARD_PCF8563_I2C_PORT     0
+#define BOARD_PCF8563_I2C_SDA      21
+#define BOARD_PCF8563_I2C_SCL      22
+#define BOARD_PCF8563_I2C_HZ       100000
+#define BOARD_PCF8563_I2C_ADDR     0x51
+
+/* Battery sleep = RTC-timed power-off (see the header comment). The normal
+ * server-driven interval only; paths that keep state in RTC RAM deep-sleep. */
+#define BOARD_RTC_POWER_OFF        1
 
 /* ------------------------------------------------------------------ */
 /* Battery                                                             */
@@ -138,7 +188,14 @@
  * SWAP_XY + INVERT_X align them.
  *
  * Touch works only while awake -- deep-sleep touch wake needs the ext1 ANY_LOW
- * the classic ESP32 lacks. In always-on mode main.c polls the GT911. */
+ * the classic ESP32 lacks. In always-on mode main.c polls the GT911.
+ *
+ * With touch off, touch_park_idle() sends the GT911 its sleep command before
+ * every sleep. On the other boards it also drives TP_INT low and holds it,
+ * because a sleeping GT911 wakes on a high INT; GPIO36 is input-only, so here
+ * the line is left to whatever the board's own pull does, and the driver logs
+ * the level it reads afterwards. On battery this stops mattering: the RTC
+ * power-off takes the digitiser's rail with it. */
 #define BOARD_HAS_TOUCH           1
 #define BOARD_TOUCH_I2C_PORT      0
 #define BOARD_TOUCH_I2C_SDA       21
@@ -158,8 +215,7 @@
 /* Shares the internal I2C bus with the GT911 (routed through i2c_bus_get) and
  * the BM8563 RTC. Read once per heartbeat by net_rest.c -> sht3x_read(); the
  * SHT3x single-shot command set differs from the SHT4x and SHTC3, hence a
- * third driver. The RTC stays unused -- the server bakes local time into
- * every frame. */
+ * third driver. */
 #define BOARD_HAS_SHT3X            1
 #define BOARD_SHT3X_I2C_PORT       0
 #define BOARD_SHT3X_I2C_SDA        21

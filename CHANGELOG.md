@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- M5Stack M5Paper: on battery the board now switches itself OFF between
+  wakes instead of deep-sleeping. The firmware programs the BM8563's
+  countdown timer, drops the main-rail latch (GPIO2) and the RTC's INT line
+  powers the board back on when the timer runs out, the way M5EPD's
+  `shutdown(seconds)` does. A power-on whose timer flag is set is treated as
+  a timed wake (no logo splash, no reset tap). On USB the latch drop does
+  nothing and the same path falls through to the timed deep sleep as before.
+  Only the plain server-driven interval powers off; the retry, outage and
+  low-battery paths keep state in RTC RAM and still deep-sleep. The wheel
+  buttons cannot wake a board that is off; the power button and the RTC can.
+  Motivation: a server battery log showed ~20 % a day at a 15-minute
+  interval (about 9 mA average), of which the wakes account for perhaps a
+  tenth. UNBENCHED: no current figure was taken before or after.
+
+### Fixed
+
+- M5Stack M5Paper: the panel rail enable (GPIO23) is held low through deep
+  sleep (`BOARD_EPD_HOLD_RAILS_IN_SLEEP`, as the E1003 since 1.4x), and the
+  Grove port's 5 V boost enable (GPIO5, a strapping pin that idles pulled up)
+  is driven low from the first instruction of every boot and held through
+  sleep. Before this the boost could run for every wake and both enables
+  floated for the whole sleep.
+- M5Stack M5Paper: with touch off, the GT911 park no longer tries to drive
+  and hold TP_INT (GPIO36, an input-only pad), which failed with a logged
+  error on every sleep; it sends the sleep command and logs the level the
+  line settles at, which says whether the board's own pull wakes the
+  controller again.
+- Power latch (M5Paper, Xteink X4): `power_latch_hold()` configures the pin
+  high before releasing the hold left by the last sleep, instead of after.
+  Releasing first handed the pad back to its reset state for the gap
+  between the two calls.
+- PCF8563 / BM8563: the boot-time init also disables the countdown timer and
+  the timer flag is latched before the flags are cleared.
+
 ## [1.55.0] - 2026-10-24
 
 ### Changed

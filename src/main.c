@@ -643,6 +643,38 @@ static void sleep_park_rails(void)
 #endif
 }
 
+#if BOARD_RTC_POWER_OFF
+/* Battery sleep as a power-off (M5Paper): program the RTC's countdown timer,
+ * drop the main-rail latch and let the board switch itself off; the RTC's INT
+ * line switches it back on when the timer runs out, which is what M5EPD's
+ * shutdown(seconds) does. On battery the rail collapses within milliseconds
+ * and nothing after the release runs. On USB the rail stays up, so this
+ * returns, re-asserts the latch and the caller deep-sleeps on the SoC timer
+ * as before; the RTC timer fires into an already-running board, and its flag
+ * is cleared at the next boot. Falls back to deep sleep whenever the RTC
+ * cannot be armed. */
+static void rtc_power_off_or_return(int interval_s)
+{
+    if (!rtc_pcf8563_present()) {
+        ESP_LOGW(TAG, "RTC absent; deep sleep instead of power-off");
+        return;
+    }
+    uint32_t armed = rtc_pcf8563_arm_wake_timer((uint32_t)interval_s);
+    if (armed == 0) {
+        ESP_LOGW(TAG, "RTC timer arm failed; deep sleep instead of power-off");
+        return;
+    }
+    ESP_LOGI(TAG, "on battery; powering off, RTC wakes in %u s", (unsigned)armed);
+    vTaskDelay(pdMS_TO_TICKS(20));   /* let the log line out before the rail goes */
+    power_latch_release();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    /* Still here: an external supply is holding the rail up. */
+    ESP_LOGI(TAG, "rail stayed up after the latch release (USB power?); "
+                  "deep sleeping on the SoC timer");
+    power_latch_hold();
+}
+#endif
+
 static void sleep_forever_or_until_timer(void)
 {
     buzzer_idle();   /* never leave the piezo driven across a sleep (#258) */
@@ -741,6 +773,13 @@ static void sleep_forever_or_until_timer(void)
      * from the per-wake Date-header disciplines) trims the timer so a long
      * aligned sleep lands on the wall-clock instant, not ppm-late. Exactly
      * interval * 1e6 until a drift estimate exists. */
+#if BOARD_RTC_POWER_OFF
+    /* Off rather than asleep, but only on the plain server-driven interval:
+     * the retry and outage paths (s_sleep_override_s) keep their state in RTC
+     * RAM, which a power-off erases, and would reopen the setup portal on
+     * every retry (#270). */
+    if (s_sleep_override_s <= 0) rtc_power_off_or_return(interval);
+#endif
     esp_sleep_enable_timer_wakeup(wake_align_timer_us(interval));
     power_latch_hold_through_sleep();   /* or the timer wakes nothing */
     esp_deep_sleep_start();
@@ -1522,6 +1561,11 @@ void app_main(void)
      * held, so every line below would be racing the user's thumb. No-op
      * elsewhere. See power_latch.h. */
     power_latch_hold();
+    /* Rails this firmware never uses, parked low from the first instruction
+     * rather than from sleep entry: on the M5Paper the Grove 5 V boost's
+     * enable is a strapping pin that idles pulled up, so until now the boost
+     * ran for every wake. No-op without BOARD_SLEEP_DRIVE_LOW_MASK. */
+    sleep_park_rails();
     /* Log capture next, so the uploadable log covers as much of the wake as
      * it can. UART output is unchanged. */
     log_capture_init();
@@ -1556,6 +1600,16 @@ void app_main(void)
 #endif
 
     esp_reset_reason_t reset_reason = esp_reset_reason();
+#if BOARD_RTC_POWER_OFF
+    /* An RTC-timed power-off ends in a power-on reset, which the rest of boot
+     * would read as a person's doing: logo splash, LED left on, a reset tap
+     * counted. The RTC's timer flag says which it was; it is read here,
+     * before the clock seed below clears it. */
+    if (reset_reason == ESP_RST_POWERON && rtc_pcf8563_woke_by_timer()) {
+        ESP_LOGI(TAG, "power-on by the RTC timer; treating it as a timed wake");
+        reset_reason = ESP_RST_DEEPSLEEP;
+    }
+#endif
     bool settings_mode = detect_settings_mode(reset_reason);
     /* A "first boot" (power-on, RESET button, or the reboot right after a portal
      * save) vs a timer wake from deep sleep. Connect-feedback splashes that we

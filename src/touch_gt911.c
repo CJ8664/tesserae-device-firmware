@@ -718,11 +718,31 @@ void touch_park_idle(void)
      * the internal pull-up on, and a touch-on sleep arms the RTC pull-up for
      * the ext1 wake; the hold below would latch either against the low drive,
      * ~70 uA for the whole sleep (server #327). */
-#if !(defined(CONFIG_IDF_TARGET_ESP32) && (BOARD_TOUCH_INT_PIN >= 34))
+#if defined(CONFIG_IDF_TARGET_ESP32) && (BOARD_TOUCH_INT_PIN >= 34)
+    /* Input-only pad (M5Paper, GPIO36): it cannot be driven or held, so the
+     * controller gets the sleep command and the line is left to the board's
+     * own pull. A sleeping GT911 leaves on a high INT, so if the board pulls
+     * the line up this park is undone within milliseconds; the read below
+     * says which, and is the bench question. Before this the drive and hold
+     * were attempted anyway and failed with a logged error each sleep. On
+     * battery the M5Paper powers off between wakes and the digitiser's rail
+     * goes with it, so this only matters for the USB deep-sleep path. */
+    esp_err_t err = gt_write_u8(GT_REG_COMMAND, GT_CMD_SLEEP);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "park_idle: sleep command: %s", esp_err_to_name(err));
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+    int lvl = gpio_get_level(intp);
+    s_parked = PARKED_MAGIC;
+    s_ready = false;   /* the controller is asleep; a later read must re-init */
+    ESP_LOGI(TAG, "touch disabled: GT911 sent to sleep; TP_INT reads %d after (%s)",
+             lvl, lvl ? "pulled high, the controller may have woken again"
+                      : "low, it stays asleep");
+#else
     gpio_set_pull_mode(intp, GPIO_FLOATING);
     rtc_gpio_pullup_dis(intp);
     rtc_gpio_pulldown_dis(intp);
-#endif
     gpio_set_level(intp, 0);
     gpio_set_direction(intp, GPIO_MODE_OUTPUT);
 
@@ -738,6 +758,7 @@ void touch_park_idle(void)
     s_parked = PARKED_MAGIC;
     s_ready = false;   /* the controller is asleep; a later read must re-init */
     ESP_LOGI(TAG, "touch disabled: GT911 parked in sleep mode");
+#endif
 #endif
 }
 

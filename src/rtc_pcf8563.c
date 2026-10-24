@@ -19,6 +19,15 @@
 #define PCF_REG_CTRL2     0x01   /* alarm / timer flags and enables */
 #define PCF_REG_SECONDS   0x02   /* bit 7 VL: backup ran low, time unreliable */
 #define PCF_REG_CLKOUT    0x0D   /* bit 7 FE enables the CLKOUT pin */
+#define PCF_REG_TIMER_CTL 0x0E   /* bit 7 TE runs the timer; bits 1:0 TD = source */
+#define PCF_REG_TIMER     0x0F   /* countdown value */
+
+#define PCF_CTRL2_TIE     0x01   /* timer interrupt enable */
+#define PCF_CTRL2_TF      0x04   /* timer flag: the countdown reached zero */
+#define PCF_CTRL2_AF      0x08   /* alarm flag */
+#define PCF_TIMER_OFF     0x03   /* TE clear, TD = 1/60 Hz: the power-on value */
+#define PCF_TIMER_1HZ     0x82
+#define PCF_TIMER_1_60HZ  0x83
 
 #define PCF_VL_BIT        0x80
 #define PCF_CENTURY_BIT   0x80   /* in the months register: 1 = 1900s */
@@ -35,6 +44,21 @@ static const char *TAG = "pcf8563";
 static i2c_master_dev_handle_t s_dev;
 static bool s_probed;
 static bool s_present;
+/* TF as it stood the first time this boot read CTRL2, before anything cleared
+ * it. Latched once; the init path and the public query both go through it. */
+static bool s_tf_read;
+static bool s_tf_was_set;
+
+static bool rtc_read_regs(uint8_t reg, uint8_t *out, size_t len);
+
+static void latch_timer_flag(void)
+{
+    if (s_tf_read) return;
+    uint8_t ctrl2 = 0;
+    if (!rtc_read_regs(PCF_REG_CTRL2, &ctrl2, 1)) return;   /* try again next call */
+    s_tf_read = true;
+    s_tf_was_set = (ctrl2 & PCF_CTRL2_TF) != 0;
+}
 
 static inline uint8_t bcd_to_dec(uint8_t bcd)
 {
@@ -96,12 +120,61 @@ bool rtc_pcf8563_present(void)
 }
 
 /* Seeed's rtcInit(): oscillator running, flags cleared, CLKOUT off. CLKOUT
- * would otherwise toggle at 32 kHz forever on the coin cell. */
+ * would otherwise toggle at 32 kHz forever on the coin cell. The countdown
+ * timer goes off too: on a board whose INT line is the power-on circuit
+ * (M5Paper), a timer flag left set keeps INT low and the board can never
+ * switch itself off again. The flag is latched for rtc_pcf8563_woke_by_timer()
+ * before it is cleared. */
 static bool rtc_init_regs(void)
 {
+    latch_timer_flag();
     return rtc_write_reg(PCF_REG_CTRL1, 0x00) &&
            rtc_write_reg(PCF_REG_CTRL2, 0x00) &&
+           rtc_write_reg(PCF_REG_TIMER_CTL, PCF_TIMER_OFF) &&
            rtc_write_reg(PCF_REG_CLKOUT, 0x00);
+}
+
+bool rtc_pcf8563_woke_by_timer(void)
+{
+    if (!rtc_pcf8563_present()) return false;
+    latch_timer_flag();
+    return s_tf_read && s_tf_was_set;
+}
+
+/* M5EPD's BM8563::setAlarmIRQ(int afterSeconds), register for register: value
+ * into 0x0F, source + enable into 0x0E, then TIE on and the flags clear in
+ * CTRL2. TI_TP stays 0 so INT is a level that holds until the flag is cleared,
+ * which is what a power-on circuit needs to see. */
+uint32_t rtc_pcf8563_arm_wake_timer(uint32_t seconds)
+{
+    if (!rtc_pcf8563_present()) return 0;
+    if (seconds == 0) seconds = 1;
+
+    uint8_t  ctl, value;
+    uint32_t armed;
+    if (seconds <= 255) {
+        ctl   = PCF_TIMER_1HZ;
+        value = (uint8_t)seconds;
+        armed = seconds;
+    } else {
+        uint32_t minutes = (seconds + 59) / 60;
+        if (minutes > 255) minutes = 255;
+        ctl   = PCF_TIMER_1_60HZ;
+        value = (uint8_t)minutes;
+        armed = minutes * 60;
+    }
+    /* Timer off while its value changes, so a stale count cannot fire
+     * between the two writes. */
+    if (!rtc_write_reg(PCF_REG_TIMER_CTL, PCF_TIMER_OFF) ||
+        !rtc_write_reg(PCF_REG_TIMER, value) ||
+        !rtc_write_reg(PCF_REG_TIMER_CTL, ctl) ||
+        !rtc_write_reg(PCF_REG_CTRL2, PCF_CTRL2_TIE)) {
+        ESP_LOGW(TAG, "timer arm failed");
+        return 0;
+    }
+    ESP_LOGI(TAG, "wake timer armed: %u s (%s)", (unsigned)armed,
+             ctl == PCF_TIMER_1HZ ? "1 Hz" : "1/60 Hz, up to a minute late");
+    return armed;
 }
 
 /* Days since 1970-01-01 for a proleptic Gregorian civil date. Avoids timegm(),

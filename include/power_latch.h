@@ -25,12 +25,21 @@
 
 /* Assert and keep asserted. Call FIRST in app_main(): on a unit that does not
  * self-latch, everything before this runs only while the button is held.
- * gpio_hold_dis() first, or a hold left from the last sleep makes the write a
- * no-op. Harmless on units that do self-latch. */
+ *
+ * Order matters. A hold left from the last sleep makes a level write a no-op,
+ * so the hold has to come off; but releasing it FIRST hands the pad back to
+ * its reset state (an input, pull-down on the M5Paper's GPIO2) for the
+ * microseconds until the output is configured, and on a board whose latch
+ * follows the pin that is a dip on the rail. So configure the output high
+ * while the hold still pins the pad, then release: the pad goes straight
+ * from held-high to driven-high. Harmless on units that do self-latch. */
 static inline void power_latch_hold(void)
 {
-    gpio_hold_dis((gpio_num_t)BOARD_POWER_LATCH_PIN);
     gpio_set_direction((gpio_num_t)BOARD_POWER_LATCH_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level((gpio_num_t)BOARD_POWER_LATCH_PIN, 1);
+    gpio_hold_dis((gpio_num_t)BOARD_POWER_LATCH_PIN);
+    /* Re-assert now that the pad is ours: a cold boot had no hold, so the
+     * write above already took; after a sleep this is the one that does. */
     gpio_set_level((gpio_num_t)BOARD_POWER_LATCH_PIN, 1);
 }
 

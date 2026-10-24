@@ -32,6 +32,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #include "app_config.h"   /* boards/board.h: BOARD_HAS_PCF8563 + pins */
 
@@ -51,10 +52,29 @@ bool rtc_pcf8563_store_clock(void);
 /* Whether the chip answered its address. Probed once, then cached. */
 bool rtc_pcf8563_present(void);
 
+/* Countdown timer -> INT, for boards whose INT line feeds the power-on
+ * circuit (the M5Paper): the wake-up call for an RTC-timed power-off.
+ * Programs the timer at 1 Hz for up to 255 s, else at 1/60 Hz in whole
+ * minutes rounded up (to 255 min; longer is capped, the board wakes early and
+ * simply sleeps again), enables the timer interrupt and clears any stale
+ * timer / alarm flag. The 1/60 Hz source has no known phase, so a minute-
+ * resolution wake can land up to a minute late. Returns the seconds actually
+ * programmed, 0 on failure. */
+uint32_t rtc_pcf8563_arm_wake_timer(uint32_t seconds);
+
+/* Whether the countdown timer had fired when this boot first looked (the TF
+ * flag in CTRL2). On a board that powers on from INT, true means this
+ * power-on was the timer's, not a person's. Read once and cached; every init
+ * afterwards clears the flag and disables the timer, so call this before
+ * rtc_pcf8563_seed_clock() or rely on the cache. */
+bool rtc_pcf8563_woke_by_timer(void);
+
 #else  /* no RTC on this board: compile to nothing */
 
 static inline bool rtc_pcf8563_seed_clock(void)  { return false; }
 static inline bool rtc_pcf8563_store_clock(void) { return false; }
 static inline bool rtc_pcf8563_present(void)     { return false; }
+static inline uint32_t rtc_pcf8563_arm_wake_timer(uint32_t seconds) { (void)seconds; return 0; }
+static inline bool rtc_pcf8563_woke_by_timer(void) { return false; }
 
 #endif
