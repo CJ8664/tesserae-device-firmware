@@ -661,8 +661,28 @@ void touch_park_idle(void)
 {
 #ifdef BOARD_TOUCH_EN_PIN
     /* Gated digitiser rail (Sticky): with touch off, touch_power_on() was never
-     * called, so the controller has no power to spend. Opening the bus here
-     * would RAISE that rail to talk to it -- the exact opposite of the point. */
+     * called this wake, so do not open the bus -- that would RAISE the rail to
+     * talk to the controller, the exact opposite of the point.
+     *
+     * But "never called this wake" is not "the rail is off". A sleep with touch
+     * on latched TOUCH_EN (and TP_RST with BOARD_TOUCH_HOLD_RST) high, and only
+     * touch_power_on() released those holds. After touch on -> off nothing did,
+     * so the rail stayed up through every later sleep with the GT911 still in
+     * the mode the last sleep left it -- gesture mode costs ~2.5 mA average
+     * (firmware #53). An OTA restart keeps the holds too. Release them and
+     * latch both lines low: rail off, and RST not back-feeding the unpowered
+     * controller. Harmless when touch was never on. */
+    gpio_hold_dis((gpio_num_t)BOARD_TOUCH_EN_PIN);
+    gpio_set_level((gpio_num_t)BOARD_TOUCH_EN_PIN, 0);
+    gpio_set_direction((gpio_num_t)BOARD_TOUCH_EN_PIN, GPIO_MODE_OUTPUT);
+    gpio_hold_en((gpio_num_t)BOARD_TOUCH_EN_PIN);
+#ifdef BOARD_TOUCH_RST_PIN
+    gpio_hold_dis((gpio_num_t)BOARD_TOUCH_RST_PIN);
+    gpio_set_level((gpio_num_t)BOARD_TOUCH_RST_PIN, 0);
+    gpio_set_direction((gpio_num_t)BOARD_TOUCH_RST_PIN, GPIO_MODE_OUTPUT);
+    gpio_hold_en((gpio_num_t)BOARD_TOUCH_RST_PIN);
+#endif
+    gpio_deep_sleep_hold_en();
 #else
     /* Permanently powered digitiser (E1003). The controller is scanning right
      * now and will keep scanning through the sleep unless it is told not to.
