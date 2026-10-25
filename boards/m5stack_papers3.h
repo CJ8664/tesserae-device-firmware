@@ -147,33 +147,42 @@
 #define BOARD_BATTERY_ADC_CHANNEL  ADC_CHANNEL_2
 #define BOARD_BATTERY_DIVIDER      2
 
-/* ------------------------------------------------------------------ */
-/* Touch -- present, NOT enabled yet                                   */
-/* ------------------------------------------------------------------ */
-/* A Goodix GT911 sits on the shared I2C bus (SDA 41 / SCL 42) with its
- * interrupt on GPIO48. Deliberately not switched on: this board gives the MCU
- * no TP_RST line, and touch_gt911.c drives the reset + address-select sequence
- * on BOARD_TOUCH_RST_PIN to pin the controller to 0x5d. Enabling touch here
- * means first teaching that driver a reset-less path (probe 0x5d, then 0x14,
- * skip the reset), which is its own change and its own bring-up.
- *
- * The panel comes first regardless: a display that paints correctly is the
- * prerequisite for any touch result being meaningful. The pins are recorded so
- * that work starts from facts.
- *
- *   TP INT   GPIO48        I2C SDA  GPIO41      I2C SCL  GPIO42 @ 200 kHz
- *   TP RST   not routed    address  0x5d (strapped)
- *
- * The ESPHome config the reporter had running sets mirror_x + mirror_y on the
- * touch transform, so expect BOARD_TOUCH_INVERT_X/Y = 1 as the starting guess.
- */
-
 /* Shared I2C bus: BMI270 gyro at 0x68, BM8563 RTC at 0x51, GT911 touch.
  * Declared without a sensor consumer -- this board has no SHT4x/SHTC3 -- so
- * nothing reads it yet. */
+ * only the touch driver reads it. */
 #define BOARD_PAPERS3_I2C_SDA      41
 #define BOARD_PAPERS3_I2C_SCL      42
 #define BOARD_PAPERS3_I2C_HZ       200000
+
+/* ------------------------------------------------------------------ */
+/* Touch -- Goodix GT911 on the shared I2C bus (UNVERIFIED)             */
+/* ------------------------------------------------------------------ */
+/* Same arrangement as the M5Paper: no TP_RST to the MCU, so
+ * BOARD_TOUCH_RST_PIN stays undefined and touch_gt911.c takes its reset-less
+ * path, probing the configured address and then the other one (0x5d / 0x14).
+ *
+ *   TP INT   GPIO48        I2C SDA  GPIO41      I2C SCL  GPIO42 @ 200 kHz
+ *
+ * Frame dims are the 540x960 composition. The axis mapping is the starting
+ * guess from firmware #21 (the reporter's ESPHome config mirrors both axes);
+ * nothing here has been checked against corner taps yet.
+ *
+ * GPIO48 is not an RTC pad, so a tap cannot wake the board from deep sleep:
+ * as on the M5Paper, touch only registers while it is awake, so it needs
+ * Stay awake on. The server enables it per device through
+ * touch_enabled (hardware/m5stack/papers3.json). */
+#define BOARD_HAS_TOUCH           1
+#define BOARD_TOUCH_I2C_PORT      0
+#define BOARD_TOUCH_I2C_SDA       BOARD_PAPERS3_I2C_SDA
+#define BOARD_TOUCH_I2C_SCL       BOARD_PAPERS3_I2C_SCL
+#define BOARD_TOUCH_I2C_HZ        BOARD_PAPERS3_I2C_HZ
+#define BOARD_TOUCH_I2C_ADDR      0x5d
+#define BOARD_TOUCH_INT_PIN       48
+#define BOARD_TOUCH_FRAME_W       540
+#define BOARD_TOUCH_FRAME_H       960
+#define BOARD_TOUCH_SWAP_XY       1
+#define BOARD_TOUCH_INVERT_X      1
+#define BOARD_TOUCH_INVERT_Y      1
 
 /* ------------------------------------------------------------------ */
 /* Buttons                                                             */

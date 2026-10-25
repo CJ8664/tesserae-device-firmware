@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- M5Stack PaperS3: GT911 touch is enabled, on the same reset-less path as the
+  M5Paper. It needs Stay awake on, since GPIO48 cannot wake the board from
+  deep sleep. The axis mapping is not yet checked on hardware (#21).
+
+### Fixed
+
+- Seeed reTerminal Sticky: turning touch off now switches the digitiser rail
+  off. A sleep with touch on latched TOUCH_EN (GPIO42) and TP_RST high, and
+  nothing released them once touch was off, so the GT911 stayed powered in
+  its last mode through every later sleep, at about 2.5 mA average in gesture
+  mode. With touch off both lines are now held low through sleep (#53).
+- Waveshare PhotoPainter 7.3": the AXP2101 charger settings now match their
+  intent. The VBUS limit used a reserved code (now 2000 mA), the charge
+  current was 300 mA rather than 500 mA, and charge termination was disabled
+  (now on at 25 mA). The values are read back and logged at boot.
+
 ## [1.56.0] - 2026-10-25
 
 ### Added
