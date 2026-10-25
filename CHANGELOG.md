@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.56.0] - 2026-10-25
+
 ### Changed
 
 - M5Stack M5Paper: on battery the board now switches itself OFF between
