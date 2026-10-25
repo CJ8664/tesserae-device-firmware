@@ -41,12 +41,15 @@ static const char *TAG = "pmic";
 #define ALDO_VOL_MIN_MV    500
 #define ALDO_VOL_REG_3V3   ((3300 - ALDO_VOL_MIN_MV) / ALDO_VOL_STEP_MV)   /* 28 */
 
-/* VBUS current limit (datasheet Table 7-16): 2000 mA == 0x06. */
-#define VBUS_CURRENT_LIMIT_2A   0x06
-/* Constant charge current 500 mA (low 5 bits of reg 0x62). */
-#define CHG_CURRENT_500MA   0x09
-/* Termination current 25 mA (low 4 bits of reg 0x63). */
-#define CHG_TERMINATION_25MA   0x00
+/* VBUS current limit (low 3 bits of reg 0x16): 100, 500, 900, 1000, 1500,
+ * 2000 mA for codes 0..5; 6 and 7 are reserved. */
+#define VBUS_CURRENT_LIMIT_2A   0x05
+/* Constant charge current (low 5 bits of reg 0x62): 25 mA steps up to 200 mA
+ * at code 8, then 100 mA steps, so 300 mA is 0x09 and 500 mA is 0x0B. */
+#define CHG_CURRENT_500MA   0x0B
+/* Termination (reg 0x63): current in 25 mA steps in the low 4 bits, enabled by
+ * bit 4. 0x00 left termination off, so a full cell was never cut off. */
+#define CHG_TERMINATION_25MA   0x11
 
 static i2c_master_bus_handle_t  s_i2c_bus  = NULL;
 static i2c_master_dev_handle_t  s_axp2101  = NULL;
@@ -172,6 +175,12 @@ esp_err_t pmic_init(void) {
     axp_set_voltage_reg(AXP2101_REG_INPUT_CURRENT_LIMIT, VBUS_CURRENT_LIMIT_2A);
     axp_write(AXP2101_REG_CHG_CURRENT,     CHG_CURRENT_500MA);
     axp_write(AXP2101_REG_CHG_TERMINATION, CHG_TERMINATION_25MA);
+    uint8_t lim = 0, icc = 0, iterm = 0;
+    axp_read(AXP2101_REG_INPUT_CURRENT_LIMIT, &lim);
+    axp_read(AXP2101_REG_CHG_CURRENT, &icc);
+    axp_read(AXP2101_REG_CHG_TERMINATION, &iterm);
+    ESP_LOGI(TAG, "charger: VBUS limit 0x%02X, ICC 0x%02X, ITERM 0x%02X",
+             lim, icc, iterm);
 
     /* ALDO1..4 to 3.3 V (Waveshare's factory firmware enables all four
      * together at 3.3 V on every boot; the per-rail map isn't published). */
