@@ -2490,6 +2490,19 @@ void app_main(void)
     rest_config_load();
     if (!maintenance_requested && run_manual_photo_mode(woke_by_button)) return;
 #endif
+    /* The cold-boot splash paints BEFORE the radio comes up. It used to run
+     * right after wifi_manager_init(), so the panel controller's power-up
+     * inrush landed on top of the Wi-Fi driver's start and calibration burst;
+     * on the M5Paper that combination browned the ESP32 out on every cold
+     * boot on battery and on a charger (bench 2026-10-25, reset_reason 9 two
+     * seconds after "showing logo splash"), and a brownout reset on that
+     * board drops its power latch. Painting first costs the ~1.5 s the
+     * connect used to overlap with the splash, once per cold boot. Settings
+     * mode skips it as before: the user is waiting on the editor. */
+    if (!settings_mode) {
+        maybe_show_splash(reset_reason, wifi_creds_present());
+    }
+
     ESP_ERROR_CHECK(wifi_manager_init());
     rest_config_load();
 
@@ -2692,12 +2705,7 @@ void app_main(void)
     }
 #endif
 
-    /* Skip the 30 s splash when entering settings mode -- the user is waiting
-     * on the editor, not a panel sanity check. */
-    bool have_creds = wifi_creds_present();
-    if (!settings_mode) {
-        maybe_show_splash(reset_reason, have_creds);
-    }
+    bool have_creds = wifi_creds_present();   /* the splash already ran, above wifi_manager_init() */
 
     /* The captive portal collects WiFi plus ONE transport, so a device missing
      * either is not yet usable -- send it to provisioning.

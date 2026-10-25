@@ -22,15 +22,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   interval (about 9 mA average), of which the wakes account for perhaps a
   tenth. UNBENCHED: no current figure was taken before or after.
 
+- The cold-boot logo splash paints before the Wi-Fi driver starts instead
+  of alongside it, so the panel controller's switch-on no longer coincides
+  with the radio's start-up current. Settings mode still skips the splash.
+  Found on the M5Paper, where the two together browned the ESP32 out on a
+  charger; on that board the controller's inrush from cold can trip the
+  brownout detector on a USB port on its own (a reset at the first paint of
+  a wake, then a clean paint on the retry), while on the battery the same
+  wakes are single check-ins. See the board header for what was tried.
+
 ### Fixed
 
 - M5Stack M5Paper: the panel rail enable (GPIO23) is held low through deep
   sleep (`BOARD_EPD_HOLD_RAILS_IN_SLEEP`, as the E1003 since 1.4x), and the
   5 V boost enable (GPIO5) is driven high at boot and low at sleep entry,
   held through the sleep. Before this both enables floated for the whole
-  sleep, and the boost ran on the strength of the pad's reset pull-up. The
-  boost feeds the panel path, not only the Grove port: a bench run with it
-  driven low from boot browned the chip out as the IT8951 powered up.
+  sleep, and the boost ran on the strength of the pad's reset pull-up.
+  M5Stack's own libraries switch the boost on before touching the panel,
+  so the firmware does the same rather than find out what runs from it.
 - M5Stack M5Paper: the IT8951 bring-up no longer pulses the "reset" line
   after powering the controller. On this board reset, enable and power are
   one GPIO (23), so the pulse switched the controller's rail off for 10 ms

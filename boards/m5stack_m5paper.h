@@ -120,6 +120,35 @@
 #define BOARD_WAKE_DRIVE_HIGH_MASK  (1ULL << 5)
 #define BOARD_SLEEP_DRIVE_LOW_MASK  (1ULL << 5)
 
+/* The panel rail (GPIO23) and the supply. Switching the IT8951 module on
+ * from cold pulls an inrush that a laptop USB port or a wall charger cannot
+ * cover: the ESP32's 3.3 V dips below the 2.43 V brownout floor and the chip
+ * resets, wherever in the boot the switch-on lands (bench 2026-10-25: at
+ * app_main(), at the splash, at a frame paint; a stepped enable of 40 us
+ * pulses tripped it too, and leaving the enable floating through the USB
+ * deep sleep made it worse, a reset on every retry). With the rail held low
+ * through the sleep the pattern on USB is one brownout reset at the first
+ * paint of a wake and a clean paint on the retry. On the battery the same
+ * inrush is fine (the morning's battery wakes were single check-ins, no
+ * reset pairs): a LiPo is a far stiffer source than a 500 mA port. So: no
+ * pre-charge tricks, the rail comes up at paint time, held low in sleep,
+ * and the USB bench pays one reset per wake. */
+
+/* The panel rail (GPIO23) is in the wake mask above on purpose: the IT8951
+ * module comes up at the top of app_main(), seconds before anything paints,
+ * not inside the driver's port init. Bench 2026-10-25: the first paint after
+ * the rail had been off for minutes browned the ESP32 out every time (at
+ * the splash 1.8 s in, or at a downloaded frame 4.3 s in, on battery, a
+ * charger and a laptop port alike), and the retry two seconds after the
+ * brownout reset always painted. That is the inrush of a module whose bulk
+ * capacitance has fully discharged, landing while the radio is up. Powering
+ * it first thing moves that inrush to the quietest moment of the boot, and
+ * the driver's soft-attach path (controller answering, HRDY high) then
+ * skips its own 500 ms power cycle at paint time. The cost is the module's
+ * idle draw for the few seconds between boot and paint. Until today the pad
+ * floated through deep sleep and the module most likely never went cold,
+ * which is also why the old firmware painted fine on battery and drained it. */
+
 /* The panel rail (GPIO23) is driven low at sleep entry by it8951_sleep() and
  * then, with this, HELD low through the sleep. Without the hold the pad
  * isolates at deep-sleep entry and the load switch's enable floats for the
