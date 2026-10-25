@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [1.56.0] - 2026-10-25
 
+### Added
+
+- Bluetooth diagnostics and authenticated Photo v2 capabilities include
+  `battery_mv` and `battery_pct`. Percentages use the same board-specific curve
+  or fuel gauge as network status. Unavailable readings are null; battery
+  telemetry is excluded from the photo capability digest.
+- OpenPaper L: the frame is cached in external flash and painted in a
+  radio-quiet boot pass (#42).
+
 ### Changed
 
 - M5Stack M5Paper: on battery the board now switches itself OFF between
