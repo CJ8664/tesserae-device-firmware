@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.57.0] - 2026-10-26
+
 ### Added
 
 - M5Stack PaperS3: GT911 touch is enabled, on the same reset-less path as the
