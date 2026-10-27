@@ -57,10 +57,12 @@
 /* Vendor paper-l firmware: SerialFlash on the shared SPI bus. */
 #define OPENPAPER_L_FLASH_CS    21
 #define OPENPAPER_L_FLASH_MISO  5
-/* The embedded SD card sits on the same bus with its select on GPIO13 (a
- * USB pad; the PHY is off, see below). The vendor drives it high at boot
- * before touching the flash. Left floating, the card holds MISO and the
- * flash's JEDEC id reads as zeros (bench 2026-10-27). */
+/* The V2 board (vendor schematic EPAPER133_V2, 2026-08 batch) adds an
+ * MKDV1GCL SD NAND on the same CLK/MOSI/MISO lines, select on GPIO13 (a USB
+ * pad; the PHY is off, see below), powered through an MT9700 load switch
+ * whose enable is the display rail (GPIO12). With that rail off the chip
+ * sits unpowered on MISO and the flash's JEDEC id reads as zeros (bench
+ * 2026-10-27), so the rail is raised before the flash is touched. */
 #define OPENPAPER_L_SD_CS       13
 #define EPD_PWR_SETTLE_MS 100   /* vendor waits 100 ms after the rail     */
 

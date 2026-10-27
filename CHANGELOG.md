@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- paperlesspaper OpenPaper L: the external flash is found on the V2 board.
+  That revision adds an SD NAND chip on the same SPI lines, powered through
+  a load switch whose enable is the display rail; with the rail off the
+  unpowered chip held MISO low and the flash's JEDEC query read zeros, so
+  every frame went through the spare-app-slot fallback. The rail is raised
+  before the flash is touched, and every boot logs whether the flash answered.
+
 ## [1.59.0] - 2026-10-27
 
 ### Added

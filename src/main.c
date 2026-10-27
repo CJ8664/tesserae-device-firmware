@@ -1451,10 +1451,28 @@ static void openpaper_l_bus_deselect_sd(void)
     gpio_set_level(OPENPAPER_L_SD_CS, 1);
 }
 
+/* The SD NAND that shares the bus is powered from the display rail; raise
+ * it before any flash transfer so the unpowered chip cannot clamp MISO. */
+static void openpaper_l_bus_power_rail(void)
+{
+    gpio_config_t out = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << EPD_PIN_PWR),
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    gpio_config(&out);
+    if (gpio_get_level(EPD_PIN_PWR)) return;
+    gpio_set_level(EPD_PIN_PWR, 1);
+    vTaskDelay(pdMS_TO_TICKS(EPD_PWR_SETTLE_MS));
+}
+
 static bool openpaper_l_flash_init(void)
 {
     if (s_openpaper_l_flash_ready) return true;
     openpaper_l_bus_deselect_sd();
+    openpaper_l_bus_power_rail();
     if (!s_openpaper_l_flash_bus_inited) {
         spi_bus_config_t bus = {
             .mosi_io_num = EPD_PIN_MOSI,
@@ -1498,6 +1516,17 @@ static bool openpaper_l_flash_init(void)
     ESP_LOGI(TAG, "external flash JEDEC id: %02x %02x %02x", id[0], id[1], id[2]);
     s_openpaper_l_flash_ready = true;
     return true;
+}
+
+/* Boot-time probe, logged on every wake so a unit's flash state is visible
+ * without waiting for a frame. */
+static void openpaper_l_flash_probe_log(void)
+{
+    if (openpaper_l_flash_init()) {
+        ESP_LOGI(TAG, "external flash present; frame cache uses it");
+    } else {
+        ESP_LOGW(TAG, "external flash absent or silent; frame cache uses the spare app slot");
+    }
 }
 
 static esp_err_t openpaper_l_flash_read(size_t offset, void *dst, size_t len)
@@ -2235,6 +2264,7 @@ void app_main(void)
     ESP_LOGI(TAG, "boot; reset_reason=%d wakeup_cause=%d settings_mode=%d first_boot=%d",
              reset_reason, esp_sleep_get_wakeup_cause(), settings_mode, first_boot);
 #if defined(TESSERAE_STREAM_FRAMES) && defined(TESSERAE_BOARD_PAPERLESSPAPER_OPENPAPER_L)
+    openpaper_l_flash_probe_log();
     if (!settings_mode && openpaper_l_paint_cached_frame_if_pending()) {
         led_set(false);
         sleep_forever_or_until_timer();
