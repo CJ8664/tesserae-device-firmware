@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.59.1] - 2026-10-28
+
 ### Fixed
 
 - paperlesspaper OpenPaper L: the external flash is found on the V2 board.
