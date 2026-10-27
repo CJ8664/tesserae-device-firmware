@@ -29,6 +29,7 @@
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
 #include "esp_rom_crc.h"
+#include "soc/gpio_reg.h"
 #include "esp_partition.h"
 #include "esp_random.h"
 #include "esp_sleep.h"
@@ -1457,9 +1458,68 @@ static void openpaper_l_bus_deselect_sd(void)
     gpio_set_level(OPENPAPER_L_SD_CS, 1);
 }
 
+static spi_device_handle_t s_openpaper_l_sd_raw;   /* no chip select, 400 kHz */
+
+/* Put the SD NAND into SPI mode. It powers up in SD-bus mode every time the
+ * display rail comes on, and in that mode it listens on its command line,
+ * which is the bus MOSI, and answers on it whenever a passing bit pattern
+ * looks like a valid command: a frame streamed to the panel is megabytes of
+ * such patterns. CMD0 with its select low moves it to SPI mode, where it
+ * stays silent unless selected. The vendor firmware gets the same from its
+ * SD library's begin(). Requires the SPI bus to be up and the rail on. */
+static void openpaper_l_sd_quiesce(void)
+{
+    if (!s_openpaper_l_sd_raw) {
+        spi_device_interface_config_t dev = {
+            .clock_speed_hz = 400 * 1000,
+            .mode = 0,
+            .spics_io_num = -1,
+            .queue_size = 1,
+        };
+        if (spi_bus_add_device(EPD_SPI_HOST, &dev, &s_openpaper_l_sd_raw) != ESP_OK) {
+            s_openpaper_l_sd_raw = NULL;
+            ESP_LOGW(TAG, "sd nand: could not add a bus device; left in SD mode");
+            return;
+        }
+    }
+    openpaper_l_bus_deselect_sd();
+    uint8_t r1 = 0xFF;
+    /* A card just powered answers 0x7f or nothing to the first CMD0 when it
+     * has not finished its own power-up; give it a few goes 10 ms apart. */
+    for (int attempt = 1; attempt <= 4; attempt++) {
+        uint8_t ff[10]; memset(ff, 0xFF, sizeof ff);
+        spi_transaction_t t = { .length = sizeof ff * 8, .tx_buffer = ff };
+        spi_device_polling_transmit(s_openpaper_l_sd_raw, &t);   /* 80 clocks, deselected */
+        gpio_set_level(OPENPAPER_L_SD_CS, 0);
+        uint8_t cmd0[6] = {0x40, 0, 0, 0, 0, 0x95};
+        spi_transaction_t c = { .length = sizeof cmd0 * 8, .tx_buffer = cmd0 };
+        spi_device_polling_transmit(s_openpaper_l_sd_raw, &c);
+        r1 = 0xFF;
+        for (int i = 0; i < 8 && (r1 & 0x80); i++) {
+            uint8_t tx = 0xFF, rx = 0xFF;
+            spi_transaction_t r = { .length = 8, .tx_buffer = &tx, .rx_buffer = &rx };
+            spi_device_polling_transmit(s_openpaper_l_sd_raw, &r);
+            r1 = rx;
+        }
+        gpio_set_level(OPENPAPER_L_SD_CS, 1);
+        uint8_t one = 0xFF;
+        spi_transaction_t e = { .length = 8, .tx_buffer = &one };
+        spi_device_polling_transmit(s_openpaper_l_sd_raw, &e);
+        if (r1 == 0x01) {
+            ESP_LOGI(TAG, "sd nand: CMD0 -> R1 0x01 (idle, SPI mode) on attempt %d", attempt);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    ESP_LOGW(TAG, "sd nand: CMD0 -> R1 0x%02x after 4 attempts (%s); it may still answer on the bus",
+             r1, r1 == 0xFF ? "no answer" : "unexpected");
+}
+
 /* The SD NAND that shares the bus is powered from the display rail; raise
- * it before any flash transfer so the unpowered chip cannot clamp MISO. */
-static void openpaper_l_bus_power_rail(void)
+ * it before any flash transfer so the unpowered chip cannot clamp MISO, and
+ * settle the freshly powered chip into SPI mode. Returns true when it
+ * raised the rail (so a caller that only probed can drop it again). */
+static bool openpaper_l_bus_power_rail(void)
 {
     gpio_config_t out = {
         .intr_type = GPIO_INTR_DISABLE,
@@ -1469,16 +1529,20 @@ static void openpaper_l_bus_power_rail(void)
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
     gpio_config(&out);
-    if (gpio_get_level(EPD_PIN_PWR)) return;
+    /* Read the driven level from the output register: gpio_get_level() on an
+     * output-only pad reads its disabled input buffer, which is always 0, and
+     * that re-settled the rail (100 ms plus a CMD0) on every flash transfer. */
+    if ((REG_READ(GPIO_OUT_REG) >> EPD_PIN_PWR) & 1u) return false;
     gpio_set_level(EPD_PIN_PWR, 1);
     vTaskDelay(pdMS_TO_TICKS(EPD_PWR_SETTLE_MS));
+    openpaper_l_sd_quiesce();
+    return true;
 }
 
 static bool openpaper_l_flash_init(void)
 {
-    if (s_openpaper_l_flash_ready) return true;
+    if (s_openpaper_l_flash_ready) { openpaper_l_bus_power_rail(); return true; }
     openpaper_l_bus_deselect_sd();
-    openpaper_l_bus_power_rail();
     if (!s_openpaper_l_flash_bus_inited) {
         spi_bus_config_t bus = {
             .mosi_io_num = EPD_PIN_MOSI,
@@ -1495,6 +1559,7 @@ static bool openpaper_l_flash_init(void)
         }
         s_openpaper_l_flash_bus_inited = true;
     }
+    openpaper_l_bus_power_rail();
     spi_device_interface_config_t dev = {
         .clock_speed_hz = EPD_SPI_HZ,
         .mode = 0,
@@ -1528,11 +1593,14 @@ static bool openpaper_l_flash_init(void)
  * without waiting for a frame. */
 static void openpaper_l_flash_probe_log(void)
 {
+    const bool rail_was_off = !((REG_READ(GPIO_OUT_REG) >> EPD_PIN_PWR) & 1u);
     if (openpaper_l_flash_init()) {
         ESP_LOGI(TAG, "external flash present; frame cache uses it");
     } else {
         ESP_LOGW(TAG, "external flash absent or silent; frame cache uses the spare app slot");
     }
+    /* Only a probe: do not leave the panel rail burning through the wake. */
+    if (rail_was_off) gpio_set_level(EPD_PIN_PWR, 0);
 }
 
 static esp_err_t openpaper_l_flash_read(size_t offset, void *dst, size_t len)
@@ -1834,6 +1902,7 @@ static bool openpaper_l_paint_cached_frame_if_pending(void)
     vTaskDelay(pdMS_TO_TICKS(OPENPAPER_L_PANEL_OFF_SETTLE_MS));
     ESP_ERROR_CHECK(epd_port_init());
     epd_init();
+    openpaper_l_sd_quiesce();   /* the rail came up again with the panel */
     vTaskDelay(pdMS_TO_TICKS(OPENPAPER_L_PAINT_SETTLE_MS));
     bool ok = epd_stream_begin();
     uint32_t rb_crc = 0; size_t rb_zero = 0;

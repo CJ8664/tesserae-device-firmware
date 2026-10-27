@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.59.2] - 2026-10-28
+
+### Fixed
+
+- paperlesspaper OpenPaper L: short black dashes no longer appear on painted
+  frames. The V2 board's SD NAND powers up in SD-bus mode every time the
+  display rail comes on, and in that mode it listens on its command line,
+  which is the bus MOSI, and answers on it whenever a passing bit pattern
+  looks like a valid command; a frame streamed to the panel is megabytes of
+  such patterns. The chip is now moved into SPI mode (CMD0 with its select
+  low, retried until it answers idle) after every rail power-up, where it
+  stays silent unless selected. The rail state is read from the output
+  register rather than the pad, since an output-only pad reads 0 and that
+  re-settled the rail on every flash transfer, and a boot-time probe that
+  raised the rail drops it again afterwards.
+
 ## [1.59.1] - 2026-10-28
 
 ### Fixed
