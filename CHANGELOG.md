@@ -16,8 +16,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   with the SPI pins held through deep sleep, so the image stays up between
   wakes. Battery sense on GPIO4, the KEY button advances the rotation, the
   SHTC3 reports temperature and humidity, and the microSD slot carries the
-  deck cache. Built from the vendor sources and schematic without a board on
-  the bench; the PCF85063 RTC is not driven yet.
+  deck cache. Verified on a bench unit: selftest pattern, dashboard frames,
+  image held through deep sleep, battery and sensor readings. The PCF85063
+  RTC is not driven yet.
+- Board headers can name pins to hold HIGH through deep sleep
+  (`BOARD_SLEEP_DRIVE_HIGH_MASK`), alongside the existing low mask; the RLCD
+  board uses it for the controller's reset and chip select.
+- The provisioning splash has a compact layout for 400x300 landscape panels:
+  logo, title and QR in a top row, the Wi-Fi, password and URL lines full
+  width beneath at a legible size. The two-column layout squeezed its text to
+  8-px glyphs and ran off the bottom on this size.
+
+### Fixed
+
+- The SHTC3 driver takes its I2C bus from the shared helper, so a board where
+  the sensor is the first I2C part up no longer logs an I2C error on every
+  wake.
 
 ## [1.57.0] - 2026-10-26
 

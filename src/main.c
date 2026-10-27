@@ -648,6 +648,28 @@ static void sleep_park_rails(void)
     }
     gpio_deep_sleep_hold_en();
 #endif
+#ifdef BOARD_SLEEP_DRIVE_HIGH_MASK
+    /* Pins that must stay HIGH through the sleep: a display controller's
+     * reset and chip select on a panel that keeps showing its image only
+     * while it is powered and left alone (the Waveshare RLCD 4.2). Driven
+     * high BEFORE the old hold is released: a hold overrides the pad while
+     * it is on, so the release hands over to a pad already at the level, and
+     * a reset line never dips. This runs on every sleep, painted or not --
+     * a wake that found its frame unchanged never touched the panel driver,
+     * and without this its pins would isolate with everything else and the
+     * image would be gone by the next wake. */
+    uint64_t hmask = BOARD_SLEEP_DRIVE_HIGH_MASK;
+    for (int pin = 0; pin < 64; pin++) {
+        if (!(hmask & (1ULL << pin))) continue;
+        gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
+        gpio_set_pull_mode((gpio_num_t)pin, GPIO_FLOATING);
+        gpio_set_level((gpio_num_t)pin, 1);
+        gpio_hold_dis((gpio_num_t)pin);
+        gpio_set_level((gpio_num_t)pin, 1);
+        gpio_hold_en((gpio_num_t)pin);
+    }
+    gpio_deep_sleep_hold_en();
+#endif
 }
 
 #if BOARD_RTC_POWER_OFF

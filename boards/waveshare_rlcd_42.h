@@ -21,14 +21,13 @@
  * (LCD_SCL GPIO11, LCD_SDA GPIO12, LCD_RS GPIO5, LCD_CS GPIO40, LCD_RESET
  * GPIO41, LCD_TE GPIO6, BAT_ADC GPIO4, KEY GPIO18, SDA GPIO13 / SCL GPIO14).
  *
- * UNVERIFIED ON HARDWARE. Nobody here owns this board; everything above is
- * transcribed, not observed. Flash the -selftest env first and read its
- * pattern (see st7305_show_color_bars).
+ * Verified on hardware 2026-10-27 (bench unit): selftest pattern, dashboard
+ * frames over REST, image held through deep sleep, battery, SHTC3, KEY.
  */
 #pragma once
 
 /* ------------------------------------------------------------------ */
-/* Panel pin map (single controller, SPI2)                             */
+/* Panel pin map (single controller, SPI3, esp_lcd panel IO)           */
 /* ------------------------------------------------------------------ */
 #define EPD_PIN_SCLK   11
 #define EPD_PIN_MOSI   12
@@ -38,8 +37,17 @@
 /* GPIO6 is the controller's tearing-effect output; nothing reads it. There is
  * no BUSY line: the ST7305 takes a frame whenever it is awake. */
 
-#define EPD_SPI_HOST   SPI2_HOST
+#define EPD_SPI_HOST   SPI3_HOST   /* the host the vendor driver uses */
 #define EPD_SPI_HZ     (10 * 1000 * 1000)   /* Waveshare's pclk */
+
+/* The panel shows its image only while the ST7305 is powered and left alone,
+ * so its lines are parked and HELD through every deep sleep: RST and CS high
+ * (a dip on either blanks or deselects it), SCLK, MOSI and DC low so the
+ * controller's inputs never float. main.c applies these on every sleep,
+ * including wakes that found the frame unchanged and never touched the
+ * driver -- the first bench deep sleep lost the image exactly that way. */
+#define BOARD_SLEEP_DRIVE_HIGH_MASK  ((1ULL << EPD_PIN_RST) | (1ULL << EPD_PIN_CS))
+#define BOARD_SLEEP_DRIVE_LOW_MASK   ((1ULL << EPD_PIN_SCLK) | (1ULL << EPD_PIN_MOSI) | (1ULL << EPD_PIN_DC))
 
 /* Panel geometry. Landscape 400x300, 1bpp packed = 15000 bytes. The frame is
  * row-major with 8 px/byte; the driver transposes into the controller's own
@@ -94,12 +102,15 @@
  * server as on boards without an RTC. */
 
 /* microSD (deck cache): dedicated SDMMC pins, 1-bit. Waveshare's sdcard_bsp.h
- * defaults: clk=38, cmd=21, d0=39. No card-detect or slot power pin. */
+ * defaults: clk=38, cmd=21, d0=39. No card-detect or slot power pin, so an
+ * empty slot can only be found by probing; one attempt per mount (the
+ * default three cost ~400 ms of retries on every wake with no card in). */
 #define TESSERAE_SD_SLOT   1
 #define SD_USE_SDMMC       1
 #define SD_MMC_PIN_CLK     38
 #define SD_MMC_PIN_CMD     21
 #define SD_MMC_PIN_D0      39
+#define SD_MOUNT_ATTEMPTS  1
 
 /* MCU tier: ESP32-S3 + octal PSRAM (N16R8). */
 #define MCU_TIER_S3_OCTAL_PSRAM 1

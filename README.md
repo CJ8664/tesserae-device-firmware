@@ -111,9 +111,12 @@ only while the controller drives it. Its `st7305_rlcd` driver takes the ordinary
 400×300 1bpp frame, transposes it into the controller's 2×4-pixel block layout,
 and at sleep parks the controller in its low-power refresh mode with the SPI
 pins held through the ESP32-S3's deep sleep, so the picture stays up between
-wakes with no blank. **Not yet confirmed on physical hardware**: flash
-`waveshare-rlcd-42-selftest` first; its corner square and diagonal show whether
-the transpose matches the glass.
+wakes with no blank. Verified on hardware; the hold runs from the board's
+`BOARD_SLEEP_DRIVE_HIGH_MASK` / `_LOW_MASK` on every sleep, painted or not,
+since a wake whose frame was unchanged never reaches the panel driver. Its
+transport is ESP-IDF's `esp_lcd` SPI panel IO (the vendor's path) rather than
+the raw `spi_master` + GPIO chip-select the e-paper drivers use: the latter left
+this glass blank on the bench.
 
 The exception is the **M5Stack PaperS3**, which needed a driver family of its
 own because it is the first panel here with no controller chip. `parallel_epd_gray`

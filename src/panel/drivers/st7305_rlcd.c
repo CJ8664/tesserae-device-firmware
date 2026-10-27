@@ -22,17 +22,18 @@
  * Power: an RLCD shows an image only while the controller drives it. Sleep-in
  * (0x10) stops the drive and the panel goes blank, so sleep() does NOT send it.
  * It leaves the controller in low-power mode (0x39, the ~1 Hz internal
- * refresh the datasheet specifies at tens of microamps) and holds RST and CS
- * high and SCLK/MOSI low through the SoC's deep sleep. The next wake sees the
- * panel still alive (an RTC-memory flag plus the reset reason), skips the
- * hardware reset, re-sends the init sequence (harmless on a running
- * controller, and it repairs one that lost its registers) and writes the
- * frame. The old image stays up until the new bytes land: no blank, no flash.
+ * refresh the datasheet specifies at tens of microamps); the board header
+ * holds RST and CS high and SCLK/MOSI/DC low through the SoC's deep sleep
+ * (BOARD_SLEEP_DRIVE_*_MASK, applied by main.c on every sleep, painted or
+ * not). The next wake that paints sees the panel still alive (an RTC-memory
+ * flag plus the reset reason), skips the hardware reset, re-sends the init
+ * sequence (harmless on a running controller, and it repairs one that lost
+ * its registers) and writes the frame. The old image stays up until the new
+ * bytes land: no blank, no flash.
  *
- * UNVERIFIED ON HARDWARE. Written from the vendor sources and the ST7305
- * datasheet without a board on the bench. Flash the -selftest env first: the
- * bands, the corner square and the diagonal tell you whether the transpose
- * matches the glass (see st7305_show_color_bars).
+ * Verified on a Waveshare ESP32-S3-RLCD-4.2 on 2026-10-27: selftest pattern
+ * upright, dashboard frames over REST, image held through low-power mode and
+ * deep sleep, battery and SHTC3 readings.
  */
 #include "app_config.h"          /* board.h -> PANEL_DRIVER_* selection */
 
@@ -44,6 +45,7 @@
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
+#include "esp_lcd_panel_io.h"
 #include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -93,55 +95,30 @@ static const uint8_t RASET_V[] = {0x00, 0xC7};
 #define NATIVE_BLOCKS_PER_COL (EPD_HEIGHT / 4)   /* 75 */
 #define FRAME_ROW_BYTES       (EPD_WIDTH / 8)    /* 50 */
 
-static spi_device_handle_t s_spi;
+static esp_lcd_panel_io_handle_t s_io = NULL;   /* esp_lcd SPI panel IO, hardware CS */
 static bool     s_port_inited = false;
 static uint8_t *s_native = NULL;      /* EPD_BUF_BYTES, internal DMA memory */
 
-/* True once sleep() parked the controller in low-power mode with its pins
- * held. Lives in RTC memory so a deep-sleep wake (and a software reset) can
+/* True once sleep() parked the controller in low-power mode (its pins are
+ * then held by the board masks). Lives in RTC memory so a deep-sleep wake (and a software reset) can
  * tell that the image is still up and skip the hardware reset. A power-on
  * reset zeroes it. */
 static RTC_DATA_ATTR bool s_panel_live = false;
 
-/* ---------- low-level SPI/GPIO ---------- */
+/* ---------- low-level SPI/GPIO ----------
+ * The transport is ESP-IDF's esp_lcd SPI panel IO, the same path Waveshare's
+ * own driver uses: hardware chip select, DC toggled by the driver inside each
+ * transaction, mode 0. A hand-rolled spi_master transport with a GPIO chip
+ * select (the shape every e-paper driver here uses) left this glass blank on
+ * the bench while the vendor's firmware drew on it; whatever the difference
+ * was, matching their path removed it. */
 
-static esp_err_t spi_tx_raw(const uint8_t *data, size_t len)
-{
-    const size_t CHUNK = 4096;
-    spi_transaction_t t;
-    for (size_t off = 0; off < len; off += CHUNK) {
-        size_t n = (len - off > CHUNK) ? CHUNK : (len - off);
-        memset(&t, 0, sizeof t);
-        t.length = n * 8;
-        t.tx_buffer = data + off;
-        esp_err_t err = spi_device_polling_transmit(s_spi, &t);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "spi tx fail at off=%u: %s", (unsigned)off, esp_err_to_name(err));
-            return err;
-        }
-    }
-    return ESP_OK;
-}
-
-static void send_cmd(uint8_t cmd)
-{
-    gpio_set_level(EPD_PIN_DC, 0);
-    spi_tx_raw(&cmd, 1);
-}
-
-static void send_data(const uint8_t *buf, size_t len)
-{
-    gpio_set_level(EPD_PIN_DC, 1);
-    spi_tx_raw(buf, len);
-}
-
-/* One CS-framed command with optional trailing parameter bytes. */
+/* One CS-framed command with optional trailing parameter bytes. Waits for
+ * any frame write still in flight first (esp_lcd drains its queue). */
 static void cmd_data(uint8_t cmd, const uint8_t *data, size_t len)
 {
-    gpio_set_level(EPD_PIN_CS, 0);
-    send_cmd(cmd);
-    if (len) send_data(data, len);
-    gpio_set_level(EPD_PIN_CS, 1);
+    esp_err_t err = esp_lcd_panel_io_tx_param(s_io, cmd, data, len);
+    if (err != ESP_OK) ESP_LOGE(TAG, "cmd 0x%02x: %s", cmd, esp_err_to_name(err));
 }
 
 #define CMD(c)        cmd_data((c), NULL, 0)
@@ -181,17 +158,18 @@ static void transpose_frame(const uint8_t *frame, uint8_t *native)
     }
 }
 
-/* Write the whole native buffer to the controller's frame memory. */
+/* Write the whole native buffer to the controller's frame memory. The vendor
+ * sends RAMWR as its own transaction and the bytes as a colour transfer after
+ * it; a CS release in between is fine, the write pointer survives it. The
+ * colour transfer is queued; the next command (there is always one: HPM/LPM
+ * before the next write or the sleep) waits for it. */
 static void write_native(void)
 {
     cmd_data(CMD_CASET, CASET_V, sizeof CASET_V);
     cmd_data(CMD_RASET, RASET_V, sizeof RASET_V);
-    /* CS stays low across the command and every data byte (ESPHome port:
-     * a CS toggle inside the stream resets the controller's write pointer). */
-    gpio_set_level(EPD_PIN_CS, 0);
-    send_cmd(CMD_RAMWR);
-    send_data(s_native, EPD_BUF_BYTES);
-    gpio_set_level(EPD_PIN_CS, 1);
+    CMD(CMD_RAMWR);
+    esp_err_t err = esp_lcd_panel_io_tx_color(s_io, -1, s_native, EPD_BUF_BYTES);
+    if (err != ESP_OK) ESP_LOGE(TAG, "frame write: %s", esp_err_to_name(err));
 }
 
 /* ---------- driver entry points ---------- */
@@ -200,25 +178,22 @@ static esp_err_t st7305_port_init(void)
 {
     if (s_port_inited) return ESP_OK;
 
+    /* sleep() held these across the deep sleep. Release them before the SPI
+     * peripheral claims them: a hold left on pins them at their parked level
+     * and the first transaction clocks nothing. RST is configured and driven
+     * high first so it never dips on release. */
     gpio_config_t out = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,
-        .pin_bit_mask = (1ULL << EPD_PIN_RST) | (1ULL << EPD_PIN_DC) | (1ULL << EPD_PIN_CS),
+        .pin_bit_mask = (1ULL << EPD_PIN_RST),
         .pull_up_en = GPIO_PULLUP_ENABLE,
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&out));
-    gpio_set_level(EPD_PIN_CS, 1);
-    gpio_set_level(EPD_PIN_DC, 0);
     gpio_set_level(EPD_PIN_RST, 1);
-
-    /* sleep() held these across the deep sleep. Release them now that the
-     * pads are configured and driven to the same levels, so RST never dips
-     * and CS never drops while the bus is being set up. SCLK/MOSI go to the
-     * SPI peripheral next; a hold left on would pin them at their parked
-     * level and the first transaction would clock nothing. */
     gpio_hold_dis((gpio_num_t)EPD_PIN_RST);
     gpio_hold_dis((gpio_num_t)EPD_PIN_CS);
+    gpio_hold_dis((gpio_num_t)EPD_PIN_DC);
     gpio_hold_dis((gpio_num_t)EPD_PIN_SCLK);
     gpio_hold_dis((gpio_num_t)EPD_PIN_MOSI);
 
@@ -230,17 +205,20 @@ static esp_err_t st7305_port_init(void)
         .quadhd_io_num = -1,
         .max_transfer_sz = EPD_BUF_BYTES,
     };
-    spi_device_interface_config_t dev = {
-        .clock_speed_hz = EPD_SPI_HZ,
-        .mode = 0,
-        .spics_io_num = -1,            /* CS by hand: RAMWR needs it low across the stream */
-        .queue_size = 1,
-    };
     esp_err_t bus_err = spi_bus_initialize(EPD_SPI_HOST, &bus, SPI_DMA_CH_AUTO);
     if (bus_err != ESP_OK && bus_err != ESP_ERR_INVALID_STATE) {
         ESP_ERROR_CHECK(bus_err);
     }
-    ESP_ERROR_CHECK(spi_bus_add_device(EPD_SPI_HOST, &dev, &s_spi));
+    esp_lcd_panel_io_spi_config_t io = {
+        .dc_gpio_num = EPD_PIN_DC,
+        .cs_gpio_num = EPD_PIN_CS,
+        .pclk_hz = EPD_SPI_HZ,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+        .spi_mode = 0,
+        .trans_queue_depth = 10,
+    };
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)EPD_SPI_HOST, &io, &s_io));
 
     if (!s_native) {
         s_native = heap_caps_malloc(EPD_BUF_BYTES,
@@ -367,31 +345,14 @@ static void st7305_show_palette_sweep(void)
     free(fb);
 }
 
-/* Park one pin at a level and hold it through deep sleep. The pull goes off
- * first: a pull-up held against a pad driven low leaks for the whole sleep
- * (main.c sleep_park_rails has the measurement). */
-static void park_pin(int pin, int level)
-{
-    gpio_hold_dis((gpio_num_t)pin);
-    gpio_set_direction((gpio_num_t)pin, GPIO_MODE_OUTPUT);
-    gpio_set_pull_mode((gpio_num_t)pin, GPIO_FLOATING);
-    gpio_set_level((gpio_num_t)pin, level);
-    gpio_hold_en((gpio_num_t)pin);
-}
-
 static void st7305_sleep(void)
 {
-    /* Keep the image: low-power mode, display on. Sleep-in would blank it. */
+    /* Keep the image: low-power mode, display on. Sleep-in would blank it.
+     * The pins are held through the deep sleep by the board's
+     * BOARD_SLEEP_DRIVE_HIGH_MASK / _LOW_MASK (main.c sleep_park_rails),
+     * which run on EVERY sleep, including the wakes that never paint and so
+     * never reach this driver. */
     CMD(CMD_LPM);
-    /* The controller must see RST high and CS high for the whole sleep, and
-     * its clock and data inputs must not float. The S3 powers the digital
-     * pads down in deep sleep unless held. */
-    park_pin(EPD_PIN_RST, 1);
-    park_pin(EPD_PIN_CS, 1);
-    park_pin(EPD_PIN_DC, 0);
-    park_pin(EPD_PIN_SCLK, 0);
-    park_pin(EPD_PIN_MOSI, 0);
-    gpio_deep_sleep_hold_en();
     s_panel_live = true;
 }
 
