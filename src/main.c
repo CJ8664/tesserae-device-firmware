@@ -27,6 +27,8 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
+#include "esp_rom_sys.h"
+#include "esp_rom_crc.h"
 #include "esp_partition.h"
 #include "esp_random.h"
 #include "esp_sleep.h"
@@ -1330,6 +1332,7 @@ typedef struct {
     uint8_t backend;
     char etag[80];
     char part_label[17];    /* the app slot holding the frame, OTA_SLOT backend only */
+    uint32_t crc;           /* CRC-32 of the frame as downloaded */
 } openpaper_l_cache_state_t;
 
 typedef enum {
@@ -1349,6 +1352,7 @@ typedef struct {
     const esp_partition_t *part;
     size_t offset;
     size_t total;
+    uint32_t crc;
     bool bad;
 } openpaper_l_cache_sink_t;
 
@@ -1431,9 +1435,26 @@ static esp_err_t openpaper_l_flash_read_jedec(uint8_t id[3])
     return err;
 }
 
+/* Park the other chip select on the shared bus. The SD card's select is a
+ * USB pad with no pull once the PHY is off; floating, the card answers the
+ * clock and holds MISO low, and every flash read comes back as zeros. */
+static void openpaper_l_bus_deselect_sd(void)
+{
+    gpio_config_t out = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << OPENPAPER_L_SD_CS),
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    gpio_config(&out);
+    gpio_set_level(OPENPAPER_L_SD_CS, 1);
+}
+
 static bool openpaper_l_flash_init(void)
 {
     if (s_openpaper_l_flash_ready) return true;
+    openpaper_l_bus_deselect_sd();
     if (!s_openpaper_l_flash_bus_inited) {
         spi_bus_config_t bus = {
             .mosi_io_num = EPD_PIN_MOSI,
@@ -1461,6 +1482,10 @@ static bool openpaper_l_flash_init(void)
         ESP_LOGW(TAG, "external flash add device failed: %s", esp_err_to_name(err));
         return false;
     }
+    /* Release from deep power-down (0xAB) in case the previous firmware or a
+     * warm reset left the part asleep; a part that is awake ignores it. */
+    openpaper_l_flash_cmd(0xAB);
+    esp_rom_delay_us(50);
     uint8_t id[3] = {0};
     err = openpaper_l_flash_read_jedec(id);
     if (err != ESP_OK || id[0] == 0x00 || id[0] == 0xff) {
@@ -1592,6 +1617,7 @@ static esp_err_t openpaper_l_cache_sink(void *user, const uint8_t *data,
         c->bad = true;
         return err;
     }
+    c->crc = esp_rom_crc32_le(c->crc, data, len);
     c->offset += len;
     c->total += len;
     return ESP_OK;
@@ -1655,9 +1681,11 @@ static bool openpaper_l_cache_frame_backend(const char *url, const char *etag,
              "%s", part ? part->label : "");
     snprintf(s_openpaper_l_cache.etag, sizeof s_openpaper_l_cache.etag, "%s",
              etag ? etag : "");
+    s_openpaper_l_cache.crc = c.crc;
     s_openpaper_l_cache.magic = OPENPAPER_L_CACHE_MAGIC;
-    ESP_LOGI(TAG, "cached frame in %s; entering radio-free paint pass",
-             backend == OPENPAPER_L_CACHE_EXT_FLASH ? "external flash" : part->label);
+    ESP_LOGI(TAG, "cached frame in %s (crc %08x); entering radio-free paint pass",
+             backend == OPENPAPER_L_CACHE_EXT_FLASH ? "external flash" : part->label,
+             (unsigned)c.crc);
     return true;
 }
 
@@ -1763,12 +1791,14 @@ static bool openpaper_l_paint_cached_frame_if_pending(void)
     }
 
     ESP_LOGI(TAG, "painting cached OpenPaper L frame before WiFi...");
+    openpaper_l_bus_deselect_sd();
     openpaper_l_panel_hard_off();
     vTaskDelay(pdMS_TO_TICKS(OPENPAPER_L_PANEL_OFF_SETTLE_MS));
     ESP_ERROR_CHECK(epd_port_init());
     epd_init();
     vTaskDelay(pdMS_TO_TICKS(OPENPAPER_L_PAINT_SETTLE_MS));
     bool ok = epd_stream_begin();
+    uint32_t rb_crc = 0; size_t rb_zero = 0;
     for (int side = 0; ok && side < 2; side++) {
         for (int y = 0; ok && y < EPD_HEIGHT; y += EPD_STREAM_ROWS) {
             int rows = EPD_STREAM_ROWS;
@@ -1783,13 +1813,21 @@ static bool openpaper_l_paint_cached_frame_if_pending(void)
                 ok = false;
                 break;
             }
-            if (side == 0) stream_scan(&c, n);
+            if (side == 0) {
+                stream_scan(&c, n);
+                rb_crc = esp_rom_crc32_le(rb_crc, c.block, n);
+                for (size_t i = 0; i < n; i++) if (c.block[i] == 0x00) rb_zero++;
+            }
             ok = epd_stream_rows_side(side, c.block, y, rows);
         }
     }
     if (ok) {
         ESP_LOGI(TAG, "cached frame halves: non-white bytes left=%u right=%u",
                  (unsigned)c.nonwhite[0], (unsigned)c.nonwhite[1]);
+        ESP_LOGI(TAG, "cache readback crc %08x vs download %08x (%s); %u all-black bytes",
+                 (unsigned)rb_crc, (unsigned)s_openpaper_l_cache.crc,
+                 rb_crc == s_openpaper_l_cache.crc ? "match" : "MISMATCH",
+                 (unsigned)rb_zero);
     }
     epd_stream_end(ok);
     epd_sleep();

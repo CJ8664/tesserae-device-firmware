@@ -6,10 +6,16 @@
  *            (CS_M / CS_S), 4bpp packed = 960000 bytes
  *   - Power: 4 x AA NiMH behind a BQ25172 charger
  *
- * BUILT BLIND. Nobody here has the L; the pin map and the panel command
+ * CONFIRMED ON HARDWARE 2026-10-27: colour bars from the -selftest env,
+ * serial setup, and full server cycles (frame cached, radio-quiet reboot,
+ * paint, ETag committed) on a bench unit. The pin map and the panel command
  * framing come from the vendor firmware's EPD_TYPE_13INCH build
  * (paperlesspaper/paperlesspaper-firmware, src/main.cpp + src/epaper_display.*
- * and their GxEPD2 fork's GxEPD2_1330c_EL133UF3). Flash the -selftest env first.
+ * and their GxEPD2 fork's GxEPD2_1330c_EL133UF3). The bench unit's external
+ * SPI flash answers its JEDEC query with zeros on the vendor's pins, so its
+ * frames go through the spare-app-slot cache; a contributor's unit reads a
+ * Winbond id and uses the external flash. Battery scaling is still the
+ * vendor's figure, unmetered.
  *
  * Two things make this board unlike every other Spectra-6 dual target:
  *
@@ -51,6 +57,11 @@
 /* Vendor paper-l firmware: SerialFlash on the shared SPI bus. */
 #define OPENPAPER_L_FLASH_CS    21
 #define OPENPAPER_L_FLASH_MISO  5
+/* The embedded SD card sits on the same bus with its select on GPIO13 (a
+ * USB pad; the PHY is off, see below). The vendor drives it high at boot
+ * before touching the flash. Left floating, the card holds MISO and the
+ * flash's JEDEC id reads as zeros (bench 2026-10-27). */
+#define OPENPAPER_L_SD_CS       13
 #define EPD_PWR_SETTLE_MS 100   /* vendor waits 100 ms after the rail     */
 
 #define EPD_SPI_HOST   SPI2_HOST

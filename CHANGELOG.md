@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Serial setup command `bootloader`: the board restarts into the ROM's serial
+  download mode, so a host can flash it with esptool and no BOOT button. The
+  paperlesspaper frames have no DTR/RTS wiring to EN and BOOT, so this is
+  their only button-free way in. ESP32-C6, -S3 and -C3 targets; the classic
+  ESP32 has no such bit and answers with an error.
+
+### Changed
+
+- paperlesspaper OpenPaper L: confirmed on hardware. Colour bars, serial
+  setup and full server cycles (download into the cache, radio-quiet reboot,
+  paint, ETag committed) ran on a bench unit. The cached-paint pass logs the
+  frame's CRC-32 as downloaded and as read back, with its count of all-black
+  bytes, so a cache fault is distinguishable from a render or panel one.
+  Before the external flash is probed, the SD card's chip select (GPIO13, a
+  shared-bus neighbour the vendor firmware also parks) is driven high and the
+  flash is sent a release-from-power-down. The bench unit still answers its
+  JEDEC query with zeros, so it runs on the spare-app-slot cache; the warning
+  stays until that is understood.
+
 ## [1.58.0] - 2026-10-27
 
 ### Added
