@@ -55,6 +55,9 @@ jobs:
           - { env: seeed-ee02,                kind: seeed_ee02, chip: esp32s3 }
           - { env: gooddisplay-esp32-133c02,  kind: gooddisplay_esp32_133c02, chip: esp32s3 }
           - { env: soldered-inkplate-13spectra, kind: soldered_inkplate_13spectra, chip: esp32s3 }
+          # Huessen EPF1301: EL133UF1 on its own driver (no DC line, rail cycled per paint).
+          # Hardware-verified by the contributor on one frame.
+          - { env: huessen-epf1301,           kind: huessen_epf1301, chip: esp32s3 }
           - { env: elecrow-crowpanel-579,     kind: elecrow_crowpanel_579, chip: esp32s3 }
           # Reflective LCD, not e-paper: first ST7305 target. Built blind;
           # listed as experimental on the site until a unit confirms it.
