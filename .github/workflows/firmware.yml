@@ -132,6 +132,7 @@ jobs:
           - paperlesspaper-openpaper-7
           - paperlesspaper-openpaper-l
           - elecrow-crowpanel-579
+          - waveshare-rlcd-42
     steps:
       - uses: actions/checkout@v4
 

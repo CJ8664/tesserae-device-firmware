@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Waveshare ESP32-S3-RLCD-4.2: new `waveshare-rlcd-42` target (and
+  `-selftest`), the first non-e-paper panel. A 4.2" 400x300 reflective LCD
+  behind a Sitronix ST7305, driven by the new `st7305_rlcd` driver: the
+  ordinary 1bpp mono frame is transposed into the controller's 2x4 block
+  layout, and at sleep the controller is left in its low-power refresh mode
+  with the SPI pins held through deep sleep, so the image stays up between
+  wakes. Battery sense on GPIO4, the KEY button advances the rotation, the
+  SHTC3 reports temperature and humidity, and the microSD slot carries the
+  deck cache. Built from the vendor sources and schematic without a board on
+  the bench; the PCF85063 RTC is not driven yet.
+
 ## [1.57.0] - 2026-10-26
 
 ### Added
