@@ -14,6 +14,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   unpowered chip held MISO low and the flash's JEDEC query read zeros, so
   every frame went through the spare-app-slot fallback. The rail is raised
   before the flash is touched, and every boot logs whether the flash answered.
+- paperlesspaper OpenPaper L: writing a frame into the external flash takes
+  about 7 s instead of 53 s. The busy poll after each 256-byte page slept a
+  fixed 10 ms; it now polls finely and yields only once the part has been busy
+  for a while, and the cache is erased in 64 KiB blocks instead of 4 KiB
+  sectors. That is radio-on time on a battery frame.
 
 ## [1.59.0] - 2026-10-27
 

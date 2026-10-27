@@ -1405,12 +1405,18 @@ static esp_err_t openpaper_l_flash_wait_ready(void)
 {
     uint8_t tx[2] = {0x05, 0x00};
     uint8_t rx[2] = {0};
-    int64_t deadline = esp_timer_get_time() + 30000000LL;
+    /* A page program finishes in well under a millisecond and a block erase
+     * in a few hundred, so poll finely at first and only yield to the
+     * scheduler once the part has been busy for a while; a fixed 10 ms sleep
+     * per page made a 960000-byte frame take 50 s to write. */
+    const int64_t start = esp_timer_get_time();
+    const int64_t deadline = start + 30000000LL;
     do {
         esp_err_t err = openpaper_l_flash_txrx(tx, rx, sizeof tx);
         if (err != ESP_OK) return err;
         if ((rx[1] & 0x01) == 0) return ESP_OK;
-        vTaskDelay(pdMS_TO_TICKS(10));
+        if (esp_timer_get_time() - start < 4000) esp_rom_delay_us(50);
+        else vTaskDelay(1);
     } while (esp_timer_get_time() < deadline);
     return ESP_ERR_TIMEOUT;
 }
@@ -1561,11 +1567,14 @@ static esp_err_t openpaper_l_flash_read(size_t offset, void *dst, size_t len)
 static esp_err_t openpaper_l_flash_erase_frame(void)
 {
     if (!openpaper_l_flash_init()) return ESP_ERR_NOT_FOUND;
-    const size_t erase_bytes = ((size_t)EPD_BUF_BYTES + 4095u) & ~4095u;
-    for (size_t off = 0; off < erase_bytes; off += 4096) {
+    /* 64 KiB block erases (0xD8): 15 of them cover the frame, against 235
+     * sector erases, and each is far quicker than the sixteen sectors it
+     * replaces. The cache starts at offset 0, so the blocks are aligned. */
+    const size_t erase_bytes = ((size_t)EPD_BUF_BYTES + 65535u) & ~65535u;
+    for (size_t off = 0; off < erase_bytes; off += 65536) {
         esp_err_t err = openpaper_l_flash_write_enable();
         if (err != ESP_OK) return err;
-        uint8_t tx[4] = {0x20, (uint8_t)(off >> 16), (uint8_t)(off >> 8), (uint8_t)off};
+        uint8_t tx[4] = {0xD8, (uint8_t)(off >> 16), (uint8_t)(off >> 8), (uint8_t)off};
         err = openpaper_l_flash_txrx(tx, NULL, sizeof tx);
         if (err != ESP_OK) return err;
         err = openpaper_l_flash_wait_ready();
