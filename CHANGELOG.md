@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.58.0] - 2026-10-27
+
 ### Added
 
 - Waveshare ESP32-S3-RLCD-4.2: new `waveshare-rlcd-42` target (and
