@@ -44,6 +44,7 @@ one board (and thus one driver) per PlatformIO environment.
 | [Waveshare **ESP32-S3-RLCD-4.2**](https://www.waveshare.com/esp32-s3-rlcd-4.2.htm) | Reflective LCD (not e-paper), mono | ST7305 | 400×300, 1bpp | `st7305_rlcd` | `waveshare-rlcd-42` |
 | [**M5Stack PaperS3**](https://docs.m5stack.com/en/core/PaperS3) | Grayscale (4.7") | none (raw parallel glass) | 960×540, 4bpp gray | `parallel_epd_gray` | `m5stack-papers3` |
 | [**M5Stack PaperDIY**](https://docs.m5stack.com/en/core/PaperDIY_Complete_Kit) (Complete / Assembly Kit) | Grayscale (4.7") | none (raw parallel glass; panel rail on the M5PM1 PMIC) | 960×540, 4bpp gray | `parallel_epd_gray` (`EPD_PWR_M5PM1_PIN`) | `m5stack-paperdiy` |
+| [**LILYGO T5 E-Paper S3 Pro / Pro Lite**](https://github.com/Xinyuan-LilyGO/T5S3-4.7-e-paper-PRO) | Grayscale (4.7") | none (raw parallel glass; TPS65185 PMIC + PCA9535 on I2C) | 960×540, 4bpp gray | `parallel_epd_gray` (epdiy v7 path) | `lilygo-t5s3-pro` |
 | [**M5Stack M5Paper**](https://docs.m5stack.com/en/core/m5paper) (the original, pre-S3) | Grayscale (4.7") | IT8951 | 960×540, 4bpp gray | `it8951_gray` | `m5stack-m5paper` |
 | [**M5Stack PaperMono**](https://docs.m5stack.com/en/core/PaperMono) (Pro and Lite) | Grayscale (3.97") | SSD1677 | 480×800 portrait, 2bpp gray | `ssd1677_gray` | `m5stack-papermono` |
 | **Xteink X4** | Mono B/W (4.26") | SSD1677 | 800×480, 1bpp | `ssd1677_gray` (`EPD_MONO`) | `xteink-x4` |
@@ -310,7 +311,7 @@ format the firmware expects for that kind:
 | `xiao_epaper_75_bwr` | 2bpp packed BWR (4 px/byte, MSB-first, 0=black 1=white 2=red, 3 reserved) | 96000 B |
 | `waveshare_1085g` | 2bpp packed B/W/Y/R (4 px/byte, MSB-first, 0=black 1=white 2=yellow 3=red) | 163200 B |
 | `seeed_reterminal_e1003`, `seeed_ee03` | 4bpp packed grayscale (0=black…0xF=white) | 1314144 B |
-| `m5stack_papers3`, `m5stack_m5paper`, `m5stack_paperdiy` | 4bpp packed grayscale (0=black…0xF=white) | 259200 B |
+| `m5stack_papers3`, `m5stack_m5paper`, `m5stack_paperdiy`, `lilygo_t5s3_pro` | 4bpp packed grayscale (0=black…0xF=white) | 259200 B |
 
 The PhotoPainter reuses the E1002's 800×480 4bpp format exactly (render normally
 — the **180° rotation is done on-device**, so do not pre-rotate on the server).

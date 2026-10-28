@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- LILYGO T5 E-Paper S3 Pro / Pro Lite (H752-01) support: `lilygo-t5s3-pro` and
+  `lilygo-t5s3-pro-selftest` envs, board header `boards/lilygo_t5s3_pro.h`. It is
+  the PaperS3's ED047TC1 glass (960x540, 16 greys) on the epdiy v7 pin map with
+  the TPS65185 + PCA9535 power path, so it runs on the existing
+  `parallel_epd_gray` driver (`EPD_PAR_POWER_TPS65185`, `EPD_PAR_ROW_START_V7`)
+  with no driver changes. Pins are from LILYGO's `epd_60fps_probe` example.
+  Verified on hardware: the `-selftest` paints the 16 grey bands in order, and
+  the production build joins Wi-Fi, registers with a local Tesserae server
+  (0.480.0, while still reporting the PaperS3 kind, which has the same wire
+  format) and paints server-composed 960x540 dashboards; sleep and wake cycles
+  show in the server's telemetry. Not yet measured: battery life and charging.
+  Not wired up: touch, buttons, RTC, microSD, partial refresh. It reports its
+  own kind, `lilygo_t5s3_pro` (server catalog entry:
+  `hardware/lilygo/t5s3_pro.json` in the Tesserae repo), and ships with OTA off
+  until OTA has been exercised on the board. See
+  `notes/lilygo-t5s3-pro-bringup-2026-10-28.md`.
+
 ## [1.61.0] - 2026-10-28
 
 ### Added

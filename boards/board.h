@@ -54,6 +54,8 @@
 #  include "seeed_ee03.h"
 #elif defined(TESSERAE_BOARD_M5STACK_PAPERS3)
 #  include "m5stack_papers3.h"
+#elif defined(TESSERAE_BOARD_LILYGO_T5S3_PRO)
+#  include "lilygo_t5s3_pro.h"
 #elif defined(TESSERAE_BOARD_M5STACK_PAPERDIY)
 #  include "m5stack_paperdiy.h"
 #elif defined(TESSERAE_BOARD_M5STACK_M5PAPER)
