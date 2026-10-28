@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.62.1] - 2026-10-29
+
+### Fixed
+- The release build now includes the `lilygo-t5s3-pro` target, so the LILYGO
+  T5 E-Paper S3 Pro / Pro Lite image reaches the flasher. 1.62.0 added the
+  board to the CI matrix but not to the release matrix, so that release
+  shipped without it.
+
 ## [1.62.0] - 2026-10-29
 
 ### Added
