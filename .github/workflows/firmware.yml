@@ -130,6 +130,7 @@ jobs:
           - m5stack-m5paper
           - m5stack-papermono
           - m5stack-paperdiy
+          - lilygo-t5s3-pro
           - xteink-x4
           - paperlesspaper-openpaper-7
           - paperlesspaper-openpaper-l
