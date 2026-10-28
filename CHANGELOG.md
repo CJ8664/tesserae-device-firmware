@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.62.0] - 2026-10-29
+
 ### Added
 
 - LILYGO T5 E-Paper S3 Pro / Pro Lite (H752-01) support: `lilygo-t5s3-pro` and
