@@ -16,9 +16,12 @@
  * NOT the older "T5-4.7 S3" / "T5 S3 Lite" (EPD47 family, 74HCT4094) and NOT
  * the H752 (no TPS65185): those wire the panel differently.
  *
- * UNVERIFIED ON HARDWARE. Flash lilygo-t5s3-pro-selftest first and judge the
- * 16 grey bands: a blank panel with "PWRGOOD never rose" on the serial log
- * points at the TPS65185 power path.
+ * Verified by the contributor on one Pro Lite (2026-10-28): the selftest
+ * powers the rails and paints the 16 grey bands in order; the production
+ * build joins Wi-Fi, registers and paints 960x540 dashboards. Flash
+ * lilygo-t5s3-pro-selftest first on a new unit: a blank panel with "PWRGOOD
+ * never rose" on the serial log points at the TPS65185 power path. See
+ * notes/lilygo-t5s3-pro-bringup-2026-10-28.md.
  */
 #pragma once
 
