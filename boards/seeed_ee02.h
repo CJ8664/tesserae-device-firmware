@@ -99,3 +99,30 @@
 
 /* Selected panel driver: Family A variant, T133A01 dual-chip (shared w/ E1004). */
 #define PANEL_DRIVER_SPECTRA6_T133A01_DUAL 1
+
+/* Sleep parking: park every panel line low and
+ * hold it through deep sleep, plus the battery-divider gate. The panel rail
+ * is off in sleep, and low lines cannot source backfeed current into the
+ * unpowered controllers; PWR (43) low keeps the load switch off. 43/44 are
+ * also U0TXD/U0RXD, which ESP-IDF's deep-sleep pad isolation deliberately
+ * skips -- the explicit hold is what covers them. Defining any sleep mask
+ * also makes sleep_park_rails() call gpio_deep_sleep_hold_en(), which
+ * switches on that IDF isolation for every other digital pad. Holds are
+ * released in t133_port_init() before anything drives the pins. */
+#define BOARD_SLEEP_DRIVE_LOW_MASK  ((1ULL << EPD_PIN_PWR)  | \
+                                     (1ULL << EPD_PIN_SCLK) | \
+                                     (1ULL << EPD_PIN_MOSI) | \
+                                     (1ULL << EPD_PIN_DC)   | \
+                                     (1ULL << EPD_PIN_CS_M) | \
+                                     (1ULL << EPD_PIN_CS_S) | \
+                                     (1ULL << EPD_PIN_RST)  | \
+                                     (1ULL << BOARD_VBAT_SWITCH_PIN))
+
+/* The battery-divider gate must come back off its sleep hold at every
+ * wake: rails_wake() releases it (drives it low = switch off) before
+ * battery.c runs, because battery_sample_mv() drives the pin with raw
+ * gpio_set_level(), which a held pad ignores -- without this the divider
+ * would never reconnect and every post-sleep battery read would be ~0.
+ * The panel pins need no wake entry: their holds are released in
+ * t133_port_init(), and they should stay off on wakes that don't paint. */
+#define BOARD_WAKE_DRIVE_LOW_MASK   (1ULL << BOARD_VBAT_SWITCH_PIN)

@@ -328,6 +328,19 @@ static esp_err_t t133_port_init(void)
 {
     if (s_port_inited) return ESP_OK;
 
+    /* The board may park the panel pins low and hold them through deep
+     * sleep (BOARD_SLEEP_DRIVE_LOW_MASK); release every hold before
+     * driving. A held pad ignores gpio_set_level, and the SPI bus init
+     * below drives SCLK/MOSI through the GPIO matrix, so the release has
+     * to cover those too. A no-op on boards whose pins were never held.
+     * Sitting after the s_port_inited guard is safe: every park is
+     * followed by deep sleep or esp_restart(), so the next init is
+     * always on a fresh boot with the guard clear. */
+    const int pins[] = { EPD_PIN_CS_M, EPD_PIN_CS_S, EPD_PIN_RST, EPD_PIN_DC,
+                         EPD_PIN_PWR, EPD_PIN_SCLK, EPD_PIN_MOSI };
+    for (size_t i = 0; i < sizeof(pins) / sizeof(pins[0]); i++)
+        gpio_hold_dis((gpio_num_t)pins[i]);
+
     gpio_config_t out = {
         .intr_type = GPIO_INTR_DISABLE,
         .mode = GPIO_MODE_OUTPUT,

@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `seeed-ee02` now parks its panel pins in deep sleep: the board never had
+  `BOARD_SLEEP_DRIVE_*` masks, so `sleep_park_rails()` was a no-op for it and
+  every panel pad kept its active configuration, pull-ups included, for the
+  whole sleep — a battery drain of tens of mA on a board that should sleep
+  at ~10–15 µA. The board header gains the sleep/wake masks, `t133_port_init()`
+  releases the holds before driving the panel, and the low-battery
+  hibernation path (`battery_goodbye_check()`) parks too — which also keeps
+  the held image alive on `waveshare_rlcd_42` through hibernation.
+
 ## [1.62.1] - 2026-10-29
 
 ### Fixed

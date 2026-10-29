@@ -2065,6 +2065,13 @@ static void battery_goodbye_check(bool settings_mode)
     } else {
         ESP_LOGW(TAG, "battery still empty (%d mV); back to hibernation", mv);
     }
+    /* Park like every other sleep entry: without this the
+     * hibernation sleep -- the longest one, on the emptiest cell -- kept
+     * the panel pins in their active configuration and never enabled the
+     * deep-sleep pad isolation. Parked first, matching the normal sleep
+     * path's order, so no masked pin can be armed as a wake source or a
+     * power latch after it has been parked. */
+    sleep_park_rails();
     buttons_arm_ext1();
     esp_sleep_enable_timer_wakeup((uint64_t)BATTERY_GOODBYE_RECHECK_S * 1000000ULL);
     power_latch_hold_through_sleep();   /* the recheck timer must survive */
