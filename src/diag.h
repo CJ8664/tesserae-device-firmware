@@ -72,3 +72,66 @@ void diag_clear(diag_state_t *s, uint32_t id);
  * "brownout" / "panic" / "watchdog". NULL for NONE. */
 const char *diag_paint_name(diag_paint_t p);
 const char *diag_reset_name(diag_reset_t r);
+
+/* ---------- sleep/wake accounting ----------
+ *
+ * A retained record of how the device actually cycles: how many boots, why
+ * the last one woke, how long the last sleep was programmed for, and how
+ * much of each cycle was spent awake. The failure latch above can only say
+ * that something went wrong; this record is what separates "awake far
+ * longer than the nominal cycle" from "asleep but still draining" when a
+ * battery goes down faster than the code-visible energy costs explain.
+ * Kept beside the latch (same RTC_NOINIT lifetime, validated the same way,
+ * so it also survives a RESET press) and reported on /status as a separate
+ * "sleep_stats" object; unlike the latch it is never cleared by delivery.
+ * Boards that power off instead of sleeping (BOARD_RTC_POWER_OFF) lose it
+ * every cycle. Pure logic over a state struct, like the latch; diag_run.*
+ * owns the RTC copy and the IDF calls. */
+
+#define DIAG_SLEEP_MAGIC 0x41434354u   /* 'ACCT' */
+
+typedef struct {
+    uint32_t magic;
+    uint32_t boots;         /* boots since the record was (re)initialised */
+    uint32_t sleeps;        /* deep-sleep entries. Mid-cycle (when /status
+                               is sent) boots - sleeps - 1 = cycles that
+                               ended otherwise (restart, crash) and so are
+                               missing from the awake figures */
+    uint32_t wake_cause;    /* esp_sleep_wakeup_cause_t of the latest boot */
+    uint32_t reset_reason;  /* esp_reset_reason_t of the latest boot */
+    uint32_t sleep_s;       /* timer seconds programmed at the last sleep
+                               entry; 0 = no timer (indefinite sleep) */
+    uint32_t awake_ms;      /* uptime of the last completed cycle */
+    uint32_t nap_ms;        /* of which in light-sleep naps (panel BUSY) */
+    uint64_t cum_awake_ms;  /* cumulative awake_ms across all cycles */
+    uint64_t cum_nap_ms;    /* cumulative nap_ms across all cycles */
+    uint32_t magic_inv;
+} diag_sleep_state_t;
+
+typedef struct {
+    uint32_t boots;
+    uint32_t sleeps;
+    uint32_t wake_cause;
+    uint32_t reset_reason;
+    uint32_t sleep_s;
+    uint32_t awake_ms;
+    uint32_t nap_ms;
+    uint64_t cum_awake_ms;
+    uint64_t cum_nap_ms;
+} diag_sleep_report_t;
+
+/* Start of a boot: validate the retained record (anything that does not
+ * hold together restarts it), count the boot, and record why
+ * it woke. wake_cause / reset_reason are the raw IDF enum values, passed
+ * in as integers so this file stays free of IDF headers. */
+void diag_sleep_boot(diag_sleep_state_t *s, uint32_t wake_cause,
+                     uint32_t reset_reason);
+
+/* Sleep entry: count it, record the programmed timer and close out the
+ * cycle's awake and nap time. sleeps and the cum_* totals saturate rather
+ * than wrap. A record that was never booted (invalid magic) is ignored. */
+void diag_sleep_note_entry(diag_sleep_state_t *s, uint32_t sleep_s,
+                           uint32_t awake_ms, uint32_t nap_ms);
+
+/* The latest snapshot. False when no valid record exists yet. */
+bool diag_sleep_get(const diag_sleep_state_t *s, diag_sleep_report_t *out);

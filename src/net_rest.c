@@ -599,6 +599,25 @@ static bool add_diag_report(cJSON *o, uint32_t *id_out)
     return true;
 }
 
+/* Sleep/wake accounting (diag.h) as its own top-level object: the server
+ * keeps unknown status keys, but reads only the failure fields of "diag". */
+static void add_sleep_stats(cJSON *o)
+{
+    diag_sleep_report_t slp;
+    if (!diag_run_sleep_report(&slp)) return;
+    cJSON *d = cJSON_AddObjectToObject(o, "sleep_stats");
+    if (!d) return;
+    cJSON_AddNumberToObject(d, "boots", (double)slp.boots);
+    cJSON_AddNumberToObject(d, "sleeps", (double)slp.sleeps);
+    cJSON_AddNumberToObject(d, "wake_cause", (double)slp.wake_cause);
+    cJSON_AddNumberToObject(d, "reset_reason", (double)slp.reset_reason);
+    cJSON_AddNumberToObject(d, "sleep_s", (double)slp.sleep_s);
+    cJSON_AddNumberToObject(d, "awake_ms", (double)slp.awake_ms);
+    cJSON_AddNumberToObject(d, "nap_ms", (double)slp.nap_ms);
+    cJSON_AddNumberToObject(d, "cum_awake_ms", (double)slp.cum_awake_ms);
+    cJSON_AddNumberToObject(d, "cum_nap_ms", (double)slp.cum_nap_ms);
+}
+
 /* Identity body shared by /discover and /register. Caller frees. */
 /* can_stay_awake: may this device be offered always-on mode?
  *
@@ -1220,6 +1239,7 @@ rest_status_t rest_post_status(int rssi, const char *ip,
     add_logs_capability(o);
     uint32_t diag_id = 0;
     bool diag_sent = add_diag_report(o, &diag_id);
+    add_sleep_stats(o);
     char *body = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!body) return REST_NET_ERR;

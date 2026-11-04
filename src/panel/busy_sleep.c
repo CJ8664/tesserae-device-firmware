@@ -22,6 +22,7 @@ static const char *TAG = "busy_sleep";
 
 static bool     s_wifi_up, s_ble_up, s_disabled;
 static uint32_t s_count, s_rejects;
+static int64_t  s_nap_us;
 
 void epd_light_sleep_set_wifi(bool up)
 {
@@ -51,6 +52,7 @@ bool epd_light_sleep_allowed(void)
 }
 
 uint32_t epd_light_sleep_count(void) { return s_count; }
+uint32_t epd_light_sleep_ms(void) { return (uint32_t)(s_nap_us / 1000); }
 
 static uint32_t since_ms(int64_t t0)
 {
@@ -87,6 +89,11 @@ uint32_t epd_busy_sleep(gpio_num_t pin, int ready_level, uint32_t ms)
     if (gpio_wakeup_enable(pin, ready_level ? GPIO_INTR_HIGH_LEVEL
                                             : GPIO_INTR_LOW_LEVEL) != ESP_OK ||
         esp_sleep_enable_gpio_wakeup() != ESP_OK) {
+        /* Arming failed part-way: undo the pin wake and hand the GPIO
+         * switch back, as the nap path below does. The GPIO sleep source
+         * was never enabled here, and disabling it would log an error. */
+        gpio_wakeup_disable(pin);
+        esp_sleep_enable_gpio_switch(true);   /* back to IDF's default for deep sleep */
         vTaskDelay(pdMS_TO_TICKS(ms));
         return since_ms(t0);
     }
@@ -99,7 +106,9 @@ uint32_t epd_busy_sleep(gpio_num_t pin, int ready_level, uint32_t ms)
      * timed out exactly that way. */
     uint32_t nap_ms = ms < EPD_NAP_MIN_MS ? EPD_NAP_MIN_MS : ms;
     esp_sleep_enable_timer_wakeup((uint64_t)nap_ms * 1000ULL);
+    int64_t nap_t0 = esp_timer_get_time();
     esp_err_t r = esp_light_sleep_start();
+    if (r == ESP_OK) s_nap_us += esp_timer_get_time() - nap_t0;
     esp_sleep_enable_gpio_switch(true);   /* back to IDF's default for deep sleep */
 
     /* Leave nothing armed for the deep-sleep entry that follows the paint:

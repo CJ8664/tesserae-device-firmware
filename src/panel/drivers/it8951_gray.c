@@ -493,6 +493,7 @@ static void it8951_init_ladder(void)
             gpio_set_level(EPD_PIN_RST, 0);
             gpio_set_level(EPD_PIN_EN, 0);
             gpio_set_level(EPD_PIN_VCC_EN, 0);
+            diag_run_sleep_entry(1);
             esp_deep_sleep(1000000);
             /* not reached */
         }

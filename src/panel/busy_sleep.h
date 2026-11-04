@@ -40,3 +40,5 @@ uint32_t epd_busy_sleep(gpio_num_t pin, int ready_level, uint32_t ms);
 
 /* Count of light-sleep entries this boot, for the paint log line. */
 uint32_t epd_light_sleep_count(void);
+/* Total ms spent in those naps this boot (esp_timer counts them as uptime). */
+uint32_t epd_light_sleep_ms(void);
