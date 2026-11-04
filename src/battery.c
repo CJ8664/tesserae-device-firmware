@@ -82,6 +82,32 @@ static const uint16_t s_soc_mv[101] = {
     3954, 3965, 3976, 3987, 3998, 4010, 4022, 4034, 4047, 4061,
     4113,
 };
+#elif defined(TESSERAE_BOARD_SEEED_EE02)
+#define BATTERY_SOC_TABLE 1
+/* The EE02's own curve: Seeed's SenseCraft HMI firmware
+ * ships a dedicated 30-point (percent, voltage) curve for this board
+ * (src/boards/xiao_diy/config.h, BATTERY_CURVE). This is also the scale the
+ * SenseCraft control run was reported on, so Tesserae percentages stay
+ * comparable with it. The 30 points are inverted here into this file's
+ * percent-indexed form by exact piecewise-linear inversion (every segment
+ * divides into whole mV per percent, so nothing is rounded): index is the
+ * percent, value is the resting cell voltage in mV through the same 2:1
+ * divider / calibrated-ADC sense path. The curve tops out at 4150 mV.
+ * soc_from_table() below then reproduces SenseCraft's voltageToPercent()
+ * piecewise-linear lookup to the nearest integer percent. */
+static const uint16_t s_soc_mv[101] = {
+    2910, 2985, 3060, 3150, 3220, 3280, 3320, 3360, 3390, 3420,
+    3450, 3475, 3500, 3520, 3540, 3555, 3570, 3585, 3600, 3615,
+    3630, 3642, 3654, 3666, 3678, 3690, 3700, 3710, 3720, 3730,
+    3740, 3750, 3760, 3770, 3780, 3790, 3798, 3806, 3814, 3822,
+    3830, 3838, 3846, 3854, 3862, 3870, 3878, 3886, 3894, 3902,
+    3910, 3916, 3922, 3928, 3934, 3940, 3948, 3956, 3964, 3972,
+    3980, 3986, 3992, 3998, 4004, 4010, 4016, 4022, 4028, 4034,
+    4040, 4046, 4052, 4058, 4064, 4070, 4074, 4078, 4082, 4086,
+    4090, 4096, 4102, 4108, 4114, 4120, 4124, 4128, 4132, 4136,
+    4140, 4141, 4142, 4143, 4144, 4145, 4146, 4147, 4148, 4149,
+    4150,
+};
 #endif
 
 #ifdef BATTERY_SOC_TABLE

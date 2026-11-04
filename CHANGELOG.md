@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Sleep/wake accounting telemetry, sent as a top-level `sleep_stats` object
+  on every status post: boot count, deep-sleep entries (mid-cycle,
+  `boots - sleeps - 1` counts cycles that ended in a restart or crash), last
+  wake cause and reset reason (raw IDF enum values), programmed sleep
+  seconds, uptime of the last cycle and the part of it spent in light-sleep
+  panel naps, plus cumulative awake and nap totals. RTC-retained; survives a
+  RESET press. Motivated by the EE02 battery-drain investigation: it
+  separates "awake too long" from "drawing current while in deep sleep".
+
+### Fixed
+- `busy_sleep`: if arming the BUSY wake failed, `epd_busy_sleep()` returned
+  with `esp_sleep_enable_gpio_switch(false)` still in force. It now restores
+  the switch and disarms the pin wake, as the nap path does. Defensive: the
+  arming calls do not fail with a valid pin, so this is not expected to
+  change behaviour on shipped boards.
+
+### Changed
+- seeed-ee02 battery gauge now uses Seeed's measured xiao_diy discharge curve
+  (the curve SenseCraft HMI ships for this board) instead of the generic
+  two-segment mapping, so reported percentages are comparable with the
+  SenseCraft firmware's. This also moves the percent-based
+  `power_battery_critical()` floor (15%) to ~3548 mV on EE02, and the
+  goodbye cut-off (3300 mV) now reads 6% rather than 0%.
+
 ## [1.62.1] - 2026-10-29
 
 ### Fixed

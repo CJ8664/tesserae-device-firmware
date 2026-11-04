@@ -33,3 +33,13 @@ bool diag_run_report(diag_report_t *out);
 
 /* A status body carrying report `id` was accepted (2xx). */
 void diag_run_clear(uint32_t id);
+
+/* Sleep entry, called from every deep-sleep path just before it sleeps:
+ * records the programmed timer seconds (0 = no timer armed) and closes out
+ * this cycle's awake time, measured from app start (ROM and bootloader
+ * time not included), and its light-sleep nap time. The snapshot rides
+ * /status as "sleep_stats" (diag.h); delivery never clears it. */
+void diag_run_sleep_entry(uint32_t sleep_s);
+
+/* The latest sleep/wake accounting snapshot, if a boot has been counted. */
+bool diag_run_sleep_report(diag_sleep_report_t *out);

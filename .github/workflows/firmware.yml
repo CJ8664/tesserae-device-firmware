@@ -63,6 +63,12 @@ jobs:
       - name: Bluetooth setup protocol vectors
         run: sh tools/test_ble_setup_protocol.sh
 
+      - name: Diagnostics latch, sleep accounting and log capture tests
+        run: sh tools/test_log_capture.sh
+
+      - name: Battery gauge mapping tests
+        run: sh tools/test_battery_gauge.sh
+
       - name: Deck cache logic tests
         run: sh tools/test_deck.sh
 

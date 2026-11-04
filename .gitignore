@@ -14,6 +14,7 @@ sdkconfig
 sdkconfig.*
 !sdkconfig.defaults
 !sdkconfig.*.defaults
+!test/battery_stubs/sdkconfig.h
 
 # ESP-IDF component manager
 managed_components/

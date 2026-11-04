@@ -8,12 +8,16 @@
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_sleep.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "panel/busy_sleep.h"
 
 static const char *TAG = "diag";
 
 RTC_NOINIT_ATTR static diag_state_t s_diag;
+RTC_NOINIT_ATTR static diag_sleep_state_t s_sleep;
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_booted;
 static uint32_t s_paint_failures;   /* this boot only */
@@ -45,10 +49,13 @@ void diag_run_boot(void)
      * counter has room before it wraps. */
     uint32_t seed = esp_random() >> 1;
     uint32_t now = epoch_now();
-    diag_reset_t rk = reset_kind(esp_reset_reason());
+    esp_reset_reason_t rr = esp_reset_reason();
+    diag_reset_t rk = reset_kind(rr);
+    uint32_t wake = (uint32_t)esp_sleep_get_wakeup_cause();
     diag_report_t rep;
     portENTER_CRITICAL(&s_mux);
     diag_boot(&s_diag, rk, seed, now);
+    diag_sleep_boot(&s_sleep, wake, (uint32_t)rr);
     bool pending = diag_get(&s_diag, &rep);
     s_booted = true;
     portEXIT_CRITICAL(&s_mux);
@@ -91,4 +98,27 @@ void diag_run_clear(uint32_t id)
     diag_clear(&s_diag, id);
     portEXIT_CRITICAL(&s_mux);
     ESP_LOGI(TAG, "failure report %lu delivered", (unsigned long)id);
+}
+
+void diag_run_sleep_entry(uint32_t sleep_s)
+{
+    if (!s_booted) diag_run_boot();
+    int64_t awake_ms64 = esp_timer_get_time() / 1000;   /* since app start */
+    uint32_t awake_ms = awake_ms64 <= 0 ? 0
+                      : awake_ms64 > UINT32_MAX ? UINT32_MAX : (uint32_t)awake_ms64;
+    uint32_t nap_ms = epd_light_sleep_ms();
+    portENTER_CRITICAL(&s_mux);
+    diag_sleep_note_entry(&s_sleep, sleep_s, awake_ms, nap_ms);
+    portEXIT_CRITICAL(&s_mux);
+    ESP_LOGI(TAG, "sleep entry: programmed %lu s, awake %lu ms (%lu ms napping) this cycle",
+             (unsigned long)sleep_s, (unsigned long)awake_ms, (unsigned long)nap_ms);
+}
+
+bool diag_run_sleep_report(diag_sleep_report_t *out)
+{
+    if (!s_booted) diag_run_boot();
+    portENTER_CRITICAL(&s_mux);
+    bool ok = diag_sleep_get(&s_sleep, out);
+    portEXIT_CRITICAL(&s_mux);
+    return ok;
 }

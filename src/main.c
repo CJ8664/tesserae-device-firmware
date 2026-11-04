@@ -844,6 +844,7 @@ static void sleep_forever_or_until_timer(void)
 #endif
     esp_sleep_enable_timer_wakeup(wake_align_timer_us(interval));
     power_latch_hold_through_sleep();   /* or the timer wakes nothing */
+    diag_run_sleep_entry((uint32_t)(interval > 0 ? interval : 0));
     esp_deep_sleep_start();
     /* not reached */
 }
@@ -965,6 +966,7 @@ static void run_provisioning_then_reboot(const char *note)
     /* No wake source at all, so on a latched board drop the rail: a real
      * power-off, not an indefinite trickle. No-op elsewhere. */
     power_latch_release();
+    diag_run_sleep_entry(0);   /* no timer armed: indefinite sleep */
     esp_deep_sleep_start();
     /* not reached */
 }
@@ -1867,6 +1869,7 @@ static void openpaper_l_radio_quiet_sleep(void)
     openpaper_l_panel_hard_off();
     vTaskDelay(pdMS_TO_TICKS(OPENPAPER_L_PANEL_OFF_SETTLE_MS));
     ESP_ERROR_CHECK(esp_sleep_enable_timer_wakeup(OPENPAPER_L_RADIO_QUIET_SLEEP_US));
+    diag_run_sleep_entry((uint32_t)(OPENPAPER_L_RADIO_QUIET_SLEEP_US / 1000000ULL));
     esp_deep_sleep_start();
 }
 
@@ -2068,6 +2071,7 @@ static void battery_goodbye_check(bool settings_mode)
     buttons_arm_ext1();
     esp_sleep_enable_timer_wakeup((uint64_t)BATTERY_GOODBYE_RECHECK_S * 1000000ULL);
     power_latch_hold_through_sleep();   /* the recheck timer must survive */
+    diag_run_sleep_entry(BATTERY_GOODBYE_RECHECK_S);
     esp_deep_sleep_start();
     /* not reached */
 }
@@ -2146,6 +2150,7 @@ static void manual_photo_sleep(void)
     buttons_arm_ext1();
     esp_sleep_enable_timer_wakeup(24ULL * 60 * 60 * 1000000);
     power_latch_hold_through_sleep();
+    diag_run_sleep_entry(24u * 60 * 60);
     esp_deep_sleep_start();
 }
 #endif
